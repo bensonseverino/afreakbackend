@@ -1,0 +1,21 @@
+name = "afreak"
+pages_build_output_dir = "./dist"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "afreak-db"
+database_id = "REPLACE_WITH_D1_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "afreak-media"
+
+[vars]
+SITE_URL = "https://afreak.pages.dev"
+CURRENCY = "EUR"
+FREE_SHIPPING_THRESHOLD_CENTS = "15000"
+FLAT_SHIPPING_CENTS = "600"
+EXPRESS_SHIPPING_CENTS = "1200"

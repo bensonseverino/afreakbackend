@@ -1,0 +1,69 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=Inter:wght@400;500;600&display=swap");
+@import "tailwindcss";
+
+/* AFREAK design tokens — shared with the storefront. */
+@theme {
+  --color-ink: #0b0b0c;
+  --color-paper: #ffffff;
+  --color-mist: #f4f4f2;
+  --color-card: #ffffff;
+  --color-line: #e3e3df;
+  --color-stone: #8a8a85;
+  --color-graphite: #2a2a2c;
+  --color-volt: #d8ff3e;
+
+  --color-ok: #1e9e5a;
+  --color-warn: #d99a00;
+  --color-danger: #d02b2b;
+
+  --font-display: "Archivo", system-ui, sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+
+  --radius-none: 0px;
+}
+
+/* Square corners, no shadows — everywhere. */
+* {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-mist);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Uppercase micro-label used across the CMS. */
+.label {
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea,
+button {
+  font-family: inherit;
+  font-size: 16px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 1px;
+}
