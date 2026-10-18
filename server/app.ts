@@ -4,8 +4,8 @@ import { cors } from "./middleware/cors";
 import { sameOrigin } from "./middleware/csrf";
 import { ApiError, errorBody, ok } from "./lib/http";
 import publicRoutes from "./routes/public";
+import accountRoutes from "./routes/account";
 import adminRoutes from "./routes/admin";
-import webhookRoutes from "./routes/webhooks";
 
 /**
  * The single JSON API for both the storefront and the admin CMS.
@@ -19,8 +19,8 @@ export function buildApp() {
 
   app.get("/health", (c) => ok(c, { ok: true }));
 
-  app.route("/webhooks", webhookRoutes);
   app.route("/", publicRoutes);
+  app.route("/account", accountRoutes);
   app.route("/admin", adminRoutes);
 
   app.notFound((c) => c.json({ error: { code: "NOT_FOUND", message: "Not found" } }, 404));

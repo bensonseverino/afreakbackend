@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useLogout } from "../hooks/useAuth";
+import { api } from "../lib/api";
 import { Button } from "../components/ui";
 
 const NAV = [
@@ -18,7 +20,16 @@ const NAV = [
   ["Settings", "/admin/settings"],
 ];
 
-function NavList({ onNavigate }) {
+/** Square volt badge (pending accounts + open reset requests), refreshed every 60 s. */
+function CountBadge({ value }) {
+  return (
+    <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center bg-volt px-1 text-[10px] font-bold leading-none text-ink">
+      {value}
+    </span>
+  );
+}
+
+function NavList({ onNavigate, pendingTotal = 0 }) {
   return (
     <nav className="flex flex-col">
       {NAV.map(([label, to, end]) => (
@@ -28,14 +39,15 @@ function NavList({ onNavigate }) {
           end={!!end}
           onClick={onNavigate}
           className={({ isActive }) =>
-            `label relative border-l-[3px] px-5 py-3.5 transition-colors ${
+            `label relative flex items-center justify-between gap-2 border-l-[3px] px-5 py-3.5 transition-colors ${
               isActive
                 ? "border-volt bg-white/10 text-paper"
                 : "border-transparent text-white/60 hover:text-paper"
             }`
           }
         >
-          {label}
+          <span>{label}</span>
+          {to === "/admin/customers" && pendingTotal > 0 && <CountBadge value={pendingTotal} />}
         </NavLink>
       ))}
     </nav>
@@ -46,6 +58,14 @@ export default function AdminLayout({ admin }) {
   const [open, setOpen] = useState(false);
   const logout = useLogout();
   const navigate = useNavigate();
+
+  const counts = useQuery({
+    queryKey: ["admin-customer-counts"],
+    queryFn: () => api("/admin/customers/counts").then((r) => r.data),
+    refetchInterval: 60000,
+    refetchOnWindowFocus: true,
+  });
+  const pendingTotal = (counts.data?.pending ?? 0) + (counts.data?.openResetRequests ?? 0);
 
   const onLogout = async () => {
     await logout.mutateAsync();
@@ -62,7 +82,7 @@ export default function AdminLayout({ admin }) {
             Admin
           </p>
         </div>
-        <NavList />
+        <NavList pendingTotal={pendingTotal} />
         <div className="mt-auto border-t border-white/10 p-4">
           <p className="label mb-3 text-white/50">{admin?.email}</p>
           <div className="flex flex-col gap-2">
@@ -99,7 +119,7 @@ export default function AdminLayout({ admin }) {
                 Close
               </button>
             </div>
-            <NavList onNavigate={() => setOpen(false)} />
+            <NavList onNavigate={() => setOpen(false)} pendingTotal={pendingTotal} />
             <div className="p-4">
               <Button variant="ghost" className="!border-white/20 !text-white/70" onClick={onLogout}>
                 Sign out

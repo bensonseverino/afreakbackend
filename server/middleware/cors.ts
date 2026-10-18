@@ -24,7 +24,7 @@ export const cors = createMiddleware<AppEnv>(async (c, next) => {
     c.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
     c.header(
       "Access-Control-Allow-Headers",
-      "Content-Type,X-Setup-Token,X-Idempotency-Key",
+      "Content-Type,Authorization,X-Setup-Token,X-Idempotency-Key",
     );
     c.header("Access-Control-Max-Age", "86400");
     return c.body(null, 204);

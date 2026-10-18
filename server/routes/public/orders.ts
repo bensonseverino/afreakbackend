@@ -6,9 +6,11 @@ import { ApiError, ok } from "../../lib/http";
 import { parseJson, cleanText } from "../../lib/validate";
 import { buildQuote } from "../../lib/checkout";
 import { getSettings } from "../../lib/settings";
+import { normalizePhoneE164 } from "../../lib/customers";
 import { orderNumber } from "../../lib/ids";
 import { sendOrderEmail } from "../../lib/mail";
 import { setNoStore } from "../../middleware/cache";
+import { optionalCustomer } from "../../middleware/customerAuth";
 import { rateLimit } from "../../middleware/rateLimit";
 
 const app = new Hono<AppEnv>();
@@ -47,11 +49,20 @@ const orderSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
 });
 
+/** Guests order too, so both paths share one limiter. */
+const orderLimiter = rateLimit({ scope: "order", limit: 10, windowMs: 10 * 60_000 });
+
 /** POST /orders — create an order with server-authoritative pricing. */
-app.post("/", rateLimit({ scope: "order", limit: 10, windowMs: 10 * 60_000 }), async (c) => {
+app.post("/", optionalCustomer, orderLimiter, async (c) => {
   setNoStore(c);
   const env = c.env;
   const body = await parseJson(c, orderSchema);
+
+  // A signed-in visitor's order names their account immediately. A guest order is
+  // matched back later by email (see `linkGuestOrders`), so the email is the one
+  // identifier that has to survive the round trip.
+  const customer = c.get("customer");
+  const phoneE164 = normalizePhoneE164(customer?.phone ?? body.phone);
 
   // Idempotency: replay returns the original order.
   const idempotencyKey = c.req.header("X-Idempotency-Key") ?? null;
@@ -99,8 +110,8 @@ app.post("/", rateLimit({ scope: "order", limit: 10, windowMs: 10 * 60_000 }), a
     sql: `INSERT INTO orders
             (number, email, phone, status, payment_status, delivery_method, promo_code,
              subtotal_cents, discount_cents, shipping_cents, tax_cents, total_cents, currency,
-             shipping_address_json, idempotency_key, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+             shipping_address_json, idempotency_key, notes, customer_id, phone_e164)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
     params: [
       number,
       body.email,
@@ -123,6 +134,8 @@ app.post("/", rateLimit({ scope: "order", limit: 10, windowMs: 10 * 60_000 }), a
       }),
       idempotencyKey,
       body.notes ? cleanText(body.notes, 2000) : null,
+      customer?.id ?? null,
+      phoneE164,
     ],
   });
 

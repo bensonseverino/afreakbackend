@@ -13,7 +13,15 @@ export type ErrorCode =
   | "RATE_LIMITED"
   | "CAPTCHA_FAILED"
   | "PAYLOAD_TOO_LARGE"
-  | "INTERNAL";
+  | "INTERNAL"
+  // Customer accounts
+  | "IDENTIFIER_TAKEN"
+  | "INVALID_CREDENTIALS"
+  | "ACCOUNT_PENDING"
+  | "ACCOUNT_REJECTED"
+  | "ACCOUNT_SUSPENDED"
+  | "TOO_MANY_ATTEMPTS"
+  | "PASSWORD_CHANGE_REQUIRED";
 
 /** An error that maps cleanly onto the JSON error envelope. */
 export class ApiError extends Error {

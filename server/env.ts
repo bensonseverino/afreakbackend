@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { Customer } from "./lib/customers";
 
 /**
  * Cloudflare bindings + vars available to every Pages Function.
@@ -10,9 +11,9 @@ export type Env = {
   SESSION_SECRET: string;
   SETUP_TOKEN: string;
   TURNSTILE_SECRET?: string;
-  /** Clerk webhook endpoint secret (`whsec_…`), from the Clerk dashboard. */
-  CLERK_WEBHOOK_SECRET?: string;
   SITE_URL: string;
+  /** Dial code used when a phone number arrives without a country code. */
+  DEFAULT_PHONE_COUNTRY?: string;
   CURRENCY: string;
   FREE_SHIPPING_THRESHOLD_CENTS: string;
   FLAT_SHIPPING_CENTS: string;
@@ -32,6 +33,8 @@ export type AdminUser = {
 
 export type Variables = {
   admin: AdminUser;
+  /** Set by `requireCustomer` / `optionalCustomer` for a valid session cookie. */
+  customer?: Customer;
 };
 
 export type AppEnv = { Bindings: Env; Variables: Variables };

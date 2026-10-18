@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { api } from "../lib/api";
-import { formatPrice } from "../lib/format";
+import { formatDate, formatPrice } from "../lib/format";
 import {
   Card,
   ErrorState,
@@ -50,6 +50,15 @@ export default function Dashboard() {
     queryFn: () => api(`/admin/dashboard?range=${range}`).then((r) => r.data),
   });
 
+  const pending = useQuery({
+    queryKey: ["admin-pending-customers"],
+    queryFn: () => api("/admin/customers?status=pending&limit=5").then((r) => r.data),
+    refetchInterval: 60000,
+    refetchOnWindowFocus: true,
+  });
+  const pendingCount = pending.data?.meta?.counts?.pending ?? 0;
+  const pendingRows = pending.data?.data ?? [];
+
   return (
     <div>
       <PageHeader title="Dashboard">
@@ -74,6 +83,9 @@ export default function Dashboard() {
       {data && (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Link to="/admin/customers" className="block">
+              <StatCard label="Pending accounts" value={pendingCount} sub="Awaiting approval" />
+            </Link>
             <StatCard label="Revenue" value={formatPrice(data.stats.revenueCents)} sub="Paid + pending" />
             <StatCard label="Orders" value={data.stats.orders} />
             <StatCard label="Avg order" value={formatPrice(data.stats.averageOrderCents)} />
@@ -140,7 +152,29 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+            <Card className="p-5">
+              <p className="label mb-3 text-stone">Pending accounts</p>
+              {pendingRows.length === 0 && (
+                <p className="text-[13px] text-stone">All caught up</p>
+              )}
+              {pendingRows.map((cust) => (
+                <Link
+                  key={cust.id}
+                  to={`/admin/customers/${encodeURIComponent(cust.id)}`}
+                  className="flex items-center justify-between border-b border-line py-2 text-[13px] hover:text-ink"
+                >
+                  <span className="truncate pr-2 text-graphite">
+                    {[cust.firstName, cust.lastName].filter(Boolean).join(" ") ||
+                      cust.email ||
+                      cust.phone ||
+                      "Unnamed"}
+                  </span>
+                  <span className="whitespace-nowrap text-stone">{formatDate(cust.createdAt)}</span>
+                </Link>
+              ))}
+            </Card>
+
             <Card className="p-5">
               <p className="label mb-3 text-stone">Low stock</p>
               {data.needsAttention.lowStock.length === 0 && <p className="text-[13px] text-stone">All good</p>}

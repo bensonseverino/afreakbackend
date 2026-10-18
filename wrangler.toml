@@ -15,6 +15,8 @@ bucket_name = "afreak-products"
 
 [vars]
 SITE_URL = "https://afreak.pages.dev"
+# Country used to normalise phone numbers typed without a country code.
+DEFAULT_PHONE_COUNTRY = "KE"
 CURRENCY = "EUR"
 FREE_SHIPPING_THRESHOLD_CENTS = "15000"
 FLAT_SHIPPING_CENTS = "600"
