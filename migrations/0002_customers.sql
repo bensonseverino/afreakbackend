@@ -35,7 +35,7 @@ CREATE INDEX idx_customers_status ON customers(status, created_at DESC);
 -- ============================================================
 CREATE TABLE webhook_events (
   id TEXT PRIMARY KEY,                          -- provider message id
-  provider TEXT NOT NULL DEFAULT 'clerk',
+  provider TEXT,
   type TEXT NOT NULL,
   subject_id TEXT,                              -- the subject the event describes
   received_at TEXT NOT NULL DEFAULT (datetime('now'))

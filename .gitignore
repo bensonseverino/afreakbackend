@@ -16,6 +16,10 @@ dist-ssr
 .dev.vars
 .wrangler
 
+# D1 exports (npm run db:export)
+backup.sql
+backup-*.sql
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

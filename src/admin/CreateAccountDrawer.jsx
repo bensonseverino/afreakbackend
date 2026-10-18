@@ -33,7 +33,10 @@ export default function CreateAccountDrawer({ onClose, onSuccess }) {
   const [result, setResult] = useState(null);
 
   const set = (key) => (e) =>
-    setForm((f) => ({ ...f, [key]: e.target?.checked ?? e.target?.value }));
+    setForm((f) => ({
+      ...f,
+      [key]: e.target?.type === "checkbox" ? e.target.checked : e.target.value,
+    }));
 
   const wantsEmail = form.channel === "email" || form.channel === "both";
   const wantsPhone = form.channel === "phone" || form.channel === "both";

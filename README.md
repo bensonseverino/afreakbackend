@@ -52,7 +52,6 @@ Local development reads `.dev.vars`:
 ```ini
 SESSION_SECRET=<at least 32 random characters>
 SETUP_TOKEN=<one-time token used to create the first owner account>
-CLERK_WEBHOOK_SECRET=<whsec_… from the Clerk webhook endpoint>
 ```
 
 For the deployed site add the same values as encrypted secrets:
@@ -60,15 +59,10 @@ For the deployed site add the same values as encrypted secrets:
 ```bash
 npx wrangler pages secret put SESSION_SECRET
 npx wrangler pages secret put SETUP_TOKEN
-npx wrangler pages secret put CLERK_WEBHOOK_SECRET
 ```
 
 `SETUP_TOKEN` only needs to exist until the first owner account is created —
 `POST /api/admin/setup` permanently disables itself once any admin exists.
-
-`CLERK_WEBHOOK_SECRET` is issued by Clerk when you add the webhook endpoint —
-see [Customer accounts](#customer-accounts-clerk). Until it is set,
-`POST /api/webhooks/clerk` answers `401` and no customers are synced.
 
 ### 4. Apply migrations
 
@@ -151,6 +145,7 @@ deploying schema changes.
 | Variable                       | Default                | Purpose                              |
 | ------------------------------ | ---------------------- | ------------------------------------ |
 | `SITE_URL`                     | `https://afreak.pages.dev` | Canonical origin, used in emails  |
+| `DEFAULT_PHONE_COUNTRY`        | `KE`                   | Country assumed when a phone number arrives without a country code |
 | `CURRENCY`                     | `EUR`                  | Currency code returned with money    |
 | `FREE_SHIPPING_THRESHOLD_CENTS`| `15000`                | Fallback if the `shipping` setting is unset |
 | `FLAT_SHIPPING_CENTS`          | `600`                  | Fallback flat rate                   |
@@ -160,9 +155,8 @@ Secrets (via `.dev.vars` locally, `wrangler pages secret put` in production):
 
 | Secret                 | Purpose                                              |
 | ---------------------- | ---------------------------------------------------- |
-| `SESSION_SECRET`       | HMAC key for admin session cookies                   |
+| `SESSION_SECRET`       | Salts the IP hashes used by the admin rate limiter   |
 | `SETUP_TOKEN`          | Gate for the one-time owner creation route           |
-| `CLERK_WEBHOOK_SECRET` | Verifies Clerk/Svix signatures on `/api/webhooks/clerk` |
 
 Shipping rates, store details, promo bar, hero slides and similar content are
 edited in `/admin` and stored in D1 (`settings` table), overriding the
@@ -190,7 +184,9 @@ Public (all under `/api`):
 - `POST /forms/:type` (`contact`, `custom_print`, `notify_me`)
 - `POST /subscribers`
 - `POST /track`
-- `POST /webhooks/clerk` — Clerk → `customers` sync (Svix signature verified)
+- `POST /account/auth/signup`, `/login`, `/logout`, `/forgot-password`
+- `GET|PATCH /account/me`, `POST /account/change-password`
+- `GET|DELETE /account/sessions[/:handle]`, `DELETE /account` (self-delete)
 
 Admin (all under `/api/admin`, session cookie required except auth routes):
 
@@ -200,7 +196,13 @@ Admin (all under `/api/admin`, session cookie required except auth routes):
   `orders` (+ `export.csv`), `promos`, `reviews`, `submissions`
   (+ `export.csv`), `subscribers` (+ `export.csv`), `media`, `content`,
   `settings/:key`, `users`
-- Read-only `GET /customers`, `GET /customers/:id` (synced from Clerk)
+- Customers: `GET /customers[?status=&q=&page=]`, `GET /customers/counts`,
+  `GET /customers/export.csv`, `POST /customers`, `POST /customers/bulk-approve`,
+  `GET /customers/:id`, `PATCH /customers/:id`,
+  `POST /customers/:id/{approve,reject,suspend,unsuspend,reset-password,link-orders}`,
+  `DELETE /customers/:id` (owner only, `?confirm=true`), and the
+  `password-requests` queue (`GET /password-requests`,
+  `POST /password-requests/:id/{resolve,dismiss}`)
 - `GET /artwork/:key` — streams private custom-print artwork
 
 Artist uploads live under the `artwork/` prefix in R2 and are **never**
@@ -209,43 +211,62 @@ artwork route.
 
 ---
 
-## Customer accounts (Clerk)
+## Customer accounts
 
-Identity lives in Clerk — the storefront never stores passwords. Accounts reach
-D1 through a webhook, so a customer row is never trusted from the browser:
+Identity lives in this API — the storefront never stores passwords. Accounts are
+created by the customer (email **or** phone + password) and only become usable
+once an admin approves them:
 
-1. The storefront signs the visitor up/in with Clerk (`@clerk/react`).
-2. Clerk delivers `user.created` / `user.updated` / `user.deleted` to the
-   endpoint below.
-3. This API verifies the Svix signature and upserts the row into `customers`,
-   keyed by the Clerk user id.
-
-Add the endpoint in the Clerk dashboard (**Configure → Webhooks → Add
-endpoint**) at `https://afreakcms.pages.dev/api/webhooks/clerk`, subscribe to
-`user.created`, `user.updated` and `user.deleted`, then copy the signing secret
-into `CLERK_WEBHOOK_SECRET`.
+1. The storefront posts to `POST /api/account/auth/signup`; the row lands in
+   `customers` with `status = 'pending'`.
+2. Sign-in (`POST /api/account/auth/login`) returns `403 ACCOUNT_PENDING` until
+   an admin approves the request in the CMS, `403 ACCOUNT_REJECTED` after a
+   rejection and `403 ACCOUNT_SUSPENDED` after a suspension.
+3. On approval the customer can sign in; the API issues an HttpOnly session
+   cookie (`afreak_cust`) backed by the `customer_sessions` table.
 
 Behaviour:
 
-- Signatures are HMAC-SHA256 over `svix-id.svix-timestamp.body`. A bad
-  signature (or a timestamp older than five minutes) is rejected with `403`.
-- Every handled `svix-id` is recorded in `webhook_events`, so Svix retries are
-  acknowledged without writing the same event twice.
-- `user.deleted` soft-deletes the row (`status = 'deleted'`, `deleted_at`) so
-  order history survives.
-- Consent is only overwritten when the Clerk user carries
-  `public_metadata.marketingOptIn` / `smsOptIn`; otherwise the stored values are
-  kept.
-- Every other event type is acknowledged and ignored.
+- Passwords are PBKDF2-SHA256 (100k iterations, per-user salt) via
+  `server/lib/password.ts`; the minimum length is 8 (`lib/passwordPolicy.ts`).
+- `identifier` may be an email address or a phone number. Phone numbers are
+  normalised to E.164 (`lib/phone.ts`), assuming `DEFAULT_PHONE_COUNTRY` when no
+  country code is given.
+- Credential endpoints are rate limited per identifier and per IP through the
+  D1-backed `rate_limits` table. Login counts *failures*; signup counts attempts.
+- Requests carry an Origin/Host check (CSRF); a cross-origin POST is rejected.
+- `POST /account/change-password` rotates the password and revokes the other
+  sessions. Admin-set or reset passwords force a change (`must_change_password`):
+  until it is changed, only `GET /account/me`, `POST /account/change-password`
+  and `POST /account/auth/logout` are allowed.
+- Forgot-password requests are queued in `password_reset_requests` for an admin
+  to action — there is no email provider hooked up yet, so the API never sends
+  mail automatically (see `server/lib/notify.ts`).
+- `DELETE /account` (self-service) and the owner-only
+  `DELETE /api/admin/customers/:id` unlink the customer's orders
+  (`orders.customer_id = NULL`, keeping `phone_e164`) and anonymise the row
+  instead of hard-deleting it.
+- Guest orders placed with the same email/phone are linked to the account on
+  sign-in/approval via `linkGuestOrders`, so order history survives signup.
 
-Synced customers are read-only in the CMS at `/admin/customers` — search, status
-filter, and a detail page with lifetime orders and spend.
+Accounts are managed in the CMS at `/admin/customers`: pending queue with
+approve/reject, status tabs, search, order linking, password reset and an audit
+trail (`customer_audit_log`).
 
-For local development the handler reads the secret from `.dev.vars` and
-`wrangler pages dev` serves it on port 8788; point a tunnelled or relayed Clerk
-endpoint (`clerk webhooks listen`) at
-`http://127.0.0.1:8788/api/webhooks/clerk` — Clerk cannot reach localhost
-directly.
+### Local development
+
+The signup/login surface needs the API reachable from the storefront. Run
+`npx wrangler pages dev dist --port 8788` and point the storefront at it (either
+`VITE_API_BASE=http://localhost:8788` or the Vite dev proxy used in the sibling
+project). Rate limits persist in local D1; clear them with:
+
+```bash
+npx wrangler d1 execute afreak-db --local --command "DELETE FROM rate_limits"
+```
+
+`npm run smoke:account` runs `scripts/account-smoke.mjs`, a 40-assertion
+end-to-end pass over signup, approval, sessions, password change/reset and
+admin actions against a running local dev server.
 
 ---
 
@@ -261,8 +282,8 @@ server/               Application code (TypeScript)
   lib/                  db, http, session, password, money, settings, ids…
   middleware/           auth, rate limiting, cache headers
   routes/public/        Storefront-facing endpoints
+  routes/account/       Customer auth + self-service account endpoints
   routes/admin/         CMS endpoints
-  routes/webhooks/      Third-party callbacks (Clerk → customers)
 migrations/           D1 schema (production-safe)
 seeds/                Sample data for local/staging only
 public/               Static passthrough (_headers, _routes.json, icons)

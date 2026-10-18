@@ -16,6 +16,7 @@
     "db:seed:local": "wrangler d1 execute afreak-db --local --file=./seeds/0002_seed.sql",
     "db:seed:remote": "wrangler d1 execute afreak-db --remote --file=./seeds/0002_seed.sql",
     "db:export": "wrangler d1 export afreak-db --remote --output=backup.sql",
+    "smoke:account": "node scripts/account-smoke.mjs",
     "cf:types": "wrangler types",
     "deploy": "npm run build && wrangler pages deploy dist --project-name afreakcms"
   },

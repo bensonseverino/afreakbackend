@@ -52,7 +52,7 @@ export default function Dashboard() {
 
   const pending = useQuery({
     queryKey: ["admin-pending-customers"],
-    queryFn: () => api("/admin/customers?status=pending&limit=5").then((r) => r.data),
+    queryFn: () => api("/admin/customers?status=pending&limit=5"),
     refetchInterval: 60000,
     refetchOnWindowFocus: true,
   });
