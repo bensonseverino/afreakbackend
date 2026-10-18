@@ -2,6 +2,15 @@ import { createMiddleware } from "hono/factory";
 import type { Env, AppEnv } from "../env";
 import { ApiError } from "../lib/http";
 
+/** True when `origin` is the origin serving the request itself. */
+export function matchesRequestOrigin(requestUrl: string, origin: string): boolean {
+  try {
+    return new URL(origin).origin === new URL(requestUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Origins we accept as same-site (the configured SITE_URL plus any localhost port). */
 export function isAllowedOrigin(env: Env, origin: string): boolean {
   let candidate: URL;
@@ -30,7 +39,7 @@ export const sameOrigin = createMiddleware<AppEnv>(async (c, next) => {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next();
 
   const origin = c.req.header("Origin");
-  if (origin && !isAllowedOrigin(c.env, origin)) {
+  if (origin && !matchesRequestOrigin(c.req.url, origin) && !isAllowedOrigin(c.env, origin)) {
     throw ApiError.forbidden("Cross-origin request rejected");
   }
   await next();
