@@ -5,6 +5,7 @@ import { sameOrigin } from "./middleware/csrf";
 import { ApiError, errorBody, ok } from "./lib/http";
 import publicRoutes from "./routes/public";
 import adminRoutes from "./routes/admin";
+import webhookRoutes from "./routes/webhooks";
 
 /**
  * The single JSON API for both the storefront and the admin CMS.
@@ -18,6 +19,7 @@ export function buildApp() {
 
   app.get("/health", (c) => ok(c, { ok: true }));
 
+  app.route("/webhooks", webhookRoutes);
   app.route("/", publicRoutes);
   app.route("/admin", adminRoutes);
 

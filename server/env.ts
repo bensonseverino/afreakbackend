@@ -10,6 +10,8 @@ export type Env = {
   SESSION_SECRET: string;
   SETUP_TOKEN: string;
   TURNSTILE_SECRET?: string;
+  /** Clerk webhook endpoint secret (`whsec_…`), from the Clerk dashboard. */
+  CLERK_WEBHOOK_SECRET?: string;
   SITE_URL: string;
   CURRENCY: string;
   FREE_SHIPPING_THRESHOLD_CENTS: string;

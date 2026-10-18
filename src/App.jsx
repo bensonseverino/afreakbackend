@@ -15,6 +15,8 @@ const OrderDetail = lazy(() => import("./admin/OrderDetail"));
 const Reviews = lazy(() => import("./admin/Reviews"));
 const Inbox = lazy(() => import("./admin/Inbox"));
 const Subscribers = lazy(() => import("./admin/Subscribers"));
+const Customers = lazy(() => import("./admin/Customers"));
+const CustomerDetail = lazy(() => import("./admin/CustomerDetail"));
 const Promos = lazy(() => import("./admin/Promos"));
 const ContentAdmin = lazy(() => import("./admin/ContentAdmin"));
 const SettingsAdmin = lazy(() => import("./admin/SettingsAdmin"));
@@ -58,6 +60,8 @@ export default function App() {
           <Route path="reviews" element={<Page><Reviews /></Page>} />
           <Route path="inbox" element={<Page><Inbox /></Page>} />
           <Route path="subscribers" element={<Page><Subscribers /></Page>} />
+          <Route path="customers" element={<Page><Customers /></Page>} />
+          <Route path="customers/:id" element={<Page><CustomerDetail /></Page>} />
           <Route path="promos" element={<Page><Promos /></Page>} />
           <Route path="content" element={<Page><ContentAdmin /></Page>} />
           <Route path="settings" element={<Page><SettingsAdmin /></Page>} />

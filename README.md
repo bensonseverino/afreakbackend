@@ -52,17 +52,23 @@ Local development reads `.dev.vars`:
 ```ini
 SESSION_SECRET=<at least 32 random characters>
 SETUP_TOKEN=<one-time token used to create the first owner account>
+CLERK_WEBHOOK_SECRET=<whsec_… from the Clerk webhook endpoint>
 ```
 
-For the deployed site add the same two values as encrypted secrets:
+For the deployed site add the same values as encrypted secrets:
 
 ```bash
 npx wrangler pages secret put SESSION_SECRET
 npx wrangler pages secret put SETUP_TOKEN
+npx wrangler pages secret put CLERK_WEBHOOK_SECRET
 ```
 
 `SETUP_TOKEN` only needs to exist until the first owner account is created —
 `POST /api/admin/setup` permanently disables itself once any admin exists.
+
+`CLERK_WEBHOOK_SECRET` is issued by Clerk when you add the webhook endpoint —
+see [Customer accounts](#customer-accounts-clerk). Until it is set,
+`POST /api/webhooks/clerk` answers `401` and no customers are synced.
 
 ### 4. Apply migrations
 
@@ -152,10 +158,11 @@ deploying schema changes.
 
 Secrets (via `.dev.vars` locally, `wrangler pages secret put` in production):
 
-| Secret           | Purpose                                    |
-| ---------------- | ------------------------------------------ |
-| `SESSION_SECRET` | HMAC key for admin session cookies         |
-| `SETUP_TOKEN`    | Gate for the one-time owner creation route |
+| Secret                 | Purpose                                              |
+| ---------------------- | ---------------------------------------------------- |
+| `SESSION_SECRET`       | HMAC key for admin session cookies                   |
+| `SETUP_TOKEN`          | Gate for the one-time owner creation route           |
+| `CLERK_WEBHOOK_SECRET` | Verifies Clerk/Svix signatures on `/api/webhooks/clerk` |
 
 Shipping rates, store details, promo bar, hero slides and similar content are
 edited in `/admin` and stored in D1 (`settings` table), overriding the
