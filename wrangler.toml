@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "afreak-db"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "e8529807-3fc0-4a86-9ee4-ba1946953f22"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
