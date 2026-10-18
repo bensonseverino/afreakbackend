@@ -190,6 +190,7 @@ Public (all under `/api`):
 - `POST /forms/:type` (`contact`, `custom_print`, `notify_me`)
 - `POST /subscribers`
 - `POST /track`
+- `POST /webhooks/clerk` — Clerk → `customers` sync (Svix signature verified)
 
 Admin (all under `/api/admin`, session cookie required except auth routes):
 
@@ -199,11 +200,52 @@ Admin (all under `/api/admin`, session cookie required except auth routes):
   `orders` (+ `export.csv`), `promos`, `reviews`, `submissions`
   (+ `export.csv`), `subscribers` (+ `export.csv`), `media`, `content`,
   `settings/:key`, `users`
+- Read-only `GET /customers`, `GET /customers/:id` (synced from Clerk)
 - `GET /artwork/:key` — streams private custom-print artwork
 
 Artist uploads live under the `artwork/` prefix in R2 and are **never**
 reachable through `/media/*`; they are only streamed by the admin-only
 artwork route.
+
+---
+
+## Customer accounts (Clerk)
+
+Identity lives in Clerk — the storefront never stores passwords. Accounts reach
+D1 through a webhook, so a customer row is never trusted from the browser:
+
+1. The storefront signs the visitor up/in with Clerk (`@clerk/react`).
+2. Clerk delivers `user.created` / `user.updated` / `user.deleted` to the
+   endpoint below.
+3. This API verifies the Svix signature and upserts the row into `customers`,
+   keyed by the Clerk user id.
+
+Add the endpoint in the Clerk dashboard (**Configure → Webhooks → Add
+endpoint**) at `https://afreakcms.pages.dev/api/webhooks/clerk`, subscribe to
+`user.created`, `user.updated` and `user.deleted`, then copy the signing secret
+into `CLERK_WEBHOOK_SECRET`.
+
+Behaviour:
+
+- Signatures are HMAC-SHA256 over `svix-id.svix-timestamp.body`. A bad
+  signature (or a timestamp older than five minutes) is rejected with `403`.
+- Every handled `svix-id` is recorded in `webhook_events`, so Svix retries are
+  acknowledged without writing the same event twice.
+- `user.deleted` soft-deletes the row (`status = 'deleted'`, `deleted_at`) so
+  order history survives.
+- Consent is only overwritten when the Clerk user carries
+  `public_metadata.marketingOptIn` / `smsOptIn`; otherwise the stored values are
+  kept.
+- Every other event type is acknowledged and ignored.
+
+Synced customers are read-only in the CMS at `/admin/customers` — search, status
+filter, and a detail page with lifetime orders and spend.
+
+For local development the handler reads the secret from `.dev.vars` and
+`wrangler pages dev` serves it on port 8788; point a tunnelled or relayed Clerk
+endpoint (`clerk webhooks listen`) at
+`http://127.0.0.1:8788/api/webhooks/clerk` — Clerk cannot reach localhost
+directly.
 
 ---
 
@@ -220,6 +262,7 @@ server/               Application code (TypeScript)
   middleware/           auth, rate limiting, cache headers
   routes/public/        Storefront-facing endpoints
   routes/admin/         CMS endpoints
+  routes/webhooks/      Third-party callbacks (Clerk → customers)
 migrations/           D1 schema (production-safe)
 seeds/                Sample data for local/staging only
 public/               Static passthrough (_headers, _routes.json, icons)
@@ -239,6 +282,9 @@ src/                  Admin CMS SPA (React + Tailwind v4)
 - **SQL** is always parameterised (prepared statements); no string-built
   queries.
 - **CORS** is not wildcard — only `SITE_URL` is allowed.
+- **Webhooks** authenticate with their provider's signature, not a session, and
+  are stored idempotently; a `403` means the signature (or its timestamp) did
+  not verify.
 - **Admin responses** are `Cache-Control: no-store`; `/admin/*` is also
   `X-Robots-Tag: noindex, nofollow`.
 - **Passwords** use PBKDF2 (100k iterations) with a per-user salt.
