@@ -39,7 +39,7 @@ npm install
 ```bash
 npx wrangler login
 npx wrangler d1 create afreak-db
-npx wrangler r2 bucket create afreak-media
+npx wrangler r2 bucket create afreak-products
 ```
 
 Copy the `database_id` printed by `d1 create` into `wrangler.toml`, replacing
@@ -74,9 +74,15 @@ npm run db:migrate:local
 npm run db:migrate:remote
 ```
 
-`migrations/0002_seed.sql` is **dev/staging sample data only** — remove it (or
-run it manually) before shipping a real store. It is not run by
-`db:migrate:local` automatically; use `npm run db:seed:local`.
+`migrations/` holds schema only. Sample data lives in `seeds/0002_seed.sql`
+and is **dev/staging only** — it is deliberately kept outside `migrations/` so
+that `wrangler d1 migrations apply` can never push demo products, reviews or
+promo codes to production.
+
+```bash
+npm run db:seed:local    # load the sample data into the local database
+npm run db:seed:remote   # only if you really want demo data in production
+```
 
 ### 5. Create the first admin
 
@@ -124,7 +130,7 @@ The CMS SPA is plain JSX and is not covered by `typecheck`.
 ## Deployment
 
 ```bash
-npm run deploy   # build + `wrangler pages deploy dist --project-name afreak`
+npm run deploy   # build + `wrangler pages deploy dist --project-name afreakcms`
 ```
 
 Remember to run `npx wrangler d1 migrations apply afreak-db --remote` after
@@ -207,7 +213,8 @@ server/               Application code (TypeScript)
   middleware/           auth, rate limiting, cache headers
   routes/public/        Storefront-facing endpoints
   routes/admin/         CMS endpoints
-migrations/           D1 schema + dev seed
+migrations/           D1 schema (production-safe)
+seeds/                Sample data for local/staging only
 public/               Static passthrough (_headers, _routes.json, icons)
 src/                  Admin CMS SPA (React + Tailwind v4)
   admin/                Screens: Dashboard, Products, Media, Orders, …

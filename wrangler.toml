@@ -1,4 +1,4 @@
-name = "afreak"
+name = "afreakcms"
 pages_build_output_dir = "./dist"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
@@ -11,7 +11,7 @@ migrations_dir = "migrations"
 
 [[r2_buckets]]
 binding = "MEDIA"
-bucket_name = "afreak-media"
+bucket_name = "afreak-products"
 
 [vars]
 SITE_URL = "https://afreak.pages.dev"
