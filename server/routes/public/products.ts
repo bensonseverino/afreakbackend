@@ -18,6 +18,7 @@ const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(48).default(12),
   new: z.string().optional(),
   featured: z.string().optional(),
+  customizable: z.string().optional(),
   minPrice: z.coerce.number().int().min(0).optional(),
   maxPrice: z.coerce.number().int().min(0).optional(),
   colors: z.string().max(400).optional(),
@@ -47,9 +48,10 @@ app.get("/", async (c) => {
   const where: string[] = ["p.status = 'published'"];
   const params: unknown[] = [];
 
-  if (q.category && q.category !== "all") {
-    where.push("c.slug = ?");
-    params.push(q.category);
+  const categories = csv(q.category).filter((slug) => slug !== "all");
+  if (categories.length) {
+    where.push(`c.slug IN (${categories.map(() => "?").join(",")})`);
+    params.push(...categories);
   }
   if (q.q) {
     where.push("(p.name LIKE ? OR p.short_description LIKE ?)");
@@ -57,6 +59,7 @@ app.get("/", async (c) => {
   }
   if (q.new === "1") where.push("p.is_new = 1");
   if (q.featured === "1") where.push("p.is_featured = 1");
+  if (q.customizable === "1") where.push("p.customizable = 1");
   if (q.minPrice != null) {
     where.push("p.price_cents >= ?");
     params.push(q.minPrice);
