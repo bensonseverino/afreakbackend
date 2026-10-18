@@ -1,15 +1,10 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../../env";
-import { all, count, first, run } from "../../lib/db";
+import { count, first, run } from "../../lib/db";
 import { ApiError, ok } from "../../lib/http";
-import { parseJson, cleanText } from "../../lib/validate";
-import {
-  PASSWORD_MIN_LENGTH,
-  constantTimeEqual,
-  hashPassword,
-  verifyPassword,
-} from "../../lib/password";
+import { parseJson } from "../../lib/validate";
+import { PASSWORD_MIN_LENGTH, hashPassword, verifyPassword } from "../../lib/password";
 import {
   clearCookie,
   createSession,
@@ -18,7 +13,6 @@ import {
   getSessionAdmin,
   sessionCookie,
 } from "../../lib/session";
-import { newId } from "../../lib/ids";
 import { clientIp, ipHash, rateLimit } from "../../middleware/rateLimit";
 import { requireAdmin } from "../../middleware/auth";
 import { setNoStore } from "../../middleware/cache";
@@ -31,10 +25,6 @@ const WINDOW_MINUTES = 15;
 const emailSchema = z.string().trim().toLowerCase().email().max(200);
 const passwordSchema = z.string().min(PASSWORD_MIN_LENGTH).max(200);
 
-async function adminsExist(env: AppEnv["Bindings"]): Promise<boolean> {
-  return (await count(env.DB, "SELECT COUNT(*) AS n FROM admins")) > 0;
-}
-
 async function recentFailures(env: AppEnv["Bindings"], hash: string): Promise<number> {
   return count(
     env.DB,
@@ -44,10 +34,9 @@ async function recentFailures(env: AppEnv["Bindings"], hash: string): Promise<nu
   );
 }
 
-/** GET /admin/me — current admin, or a setup hint on first run. */
+/** GET /admin/me — the signed-in admin. */
 app.get("/me", async (c) => {
   setNoStore(c);
-  if (!(await adminsExist(c.env))) return ok(c, { needsSetup: true });
   const admin = await getSessionAdmin(c.env, c.req.raw);
   if (!admin) throw ApiError.unauthorized();
   return ok(c, {
@@ -56,39 +45,6 @@ app.get("/me", async (c) => {
     name: admin.name,
     role: admin.role,
   });
-});
-
-/** POST /admin/setup — one-time owner creation, gated by X-Setup-Token. */
-app.post("/setup", rateLimit({ scope: "setup", limit: 10, windowMs: 60 * 60_000 }), async (c) => {
-  setNoStore(c);
-  if (await adminsExist(c.env)) throw ApiError.forbidden("Setup already completed");
-
-  const token = c.req.header("X-Setup-Token") ?? "";
-  if (!c.env.SETUP_TOKEN || !constantTimeEqual(token, c.env.SETUP_TOKEN)) {
-    throw ApiError.forbidden("Invalid setup token");
-  }
-
-  const body = await parseJson(
-    c,
-    z.object({
-      email: emailSchema,
-      password: passwordSchema,
-      name: z.string().trim().max(120).optional(),
-    }),
-  );
-
-  const { hash, salt } = await hashPassword(body.password);
-  const id = newId("adm");
-  await run(
-    c.env.DB,
-    `INSERT INTO admins (id, email, name, role, password_hash, salt)
-     VALUES (?, ?, ?, 'owner', ?, ?)`,
-    [id, body.email, body.name ? cleanText(body.name, 120) : null, hash, salt],
-  );
-
-  const sessionId = await createSession(c.env, id);
-  c.header("Set-Cookie", sessionCookie(c.req.raw, sessionId));
-  return ok(c, { id, email: body.email, role: "owner" });
 });
 
 /** POST /admin/login */

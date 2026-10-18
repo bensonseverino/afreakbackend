@@ -51,18 +51,13 @@ Local development reads `.dev.vars`:
 
 ```ini
 SESSION_SECRET=<at least 32 random characters>
-SETUP_TOKEN=<one-time token used to create the first owner account>
 ```
 
-For the deployed site add the same values as encrypted secrets:
+For the deployed site add the same value as an encrypted secret:
 
 ```bash
 npx wrangler pages secret put SESSION_SECRET
-npx wrangler pages secret put SETUP_TOKEN
 ```
-
-`SETUP_TOKEN` only needs to exist until the first owner account is created —
-`POST /api/admin/setup` permanently disables itself once any admin exists.
 
 ### 4. Apply migrations
 
@@ -84,17 +79,16 @@ npm run db:seed:local    # load the sample data into the local database
 npm run db:seed:remote   # only if you really want demo data in production
 ```
 
-### 5. Create the first admin
+### 5. Sign in to the admin
 
-Open `/admin` and use the first-run form (email, password, setup token).
-Alternatively:
+The migrations create a built-in owner account, so there is no first-run form:
 
-```bash
-curl -X POST https://<your-site>/api/admin/setup \
-  -H 'content-type: application/json' \
-  -H 'X-Setup-Token: <SETUP_TOKEN>' \
-  -d '{"email":"you@example.com","password":"at-least-10-chars","name":"Owner"}'
-```
+| Email              | Password             |
+| ------------------ | -------------------- |
+| `owner@afreak.com` | `afreak-dev-admin-1` |
+
+Open `/admin` and sign in. Change the password under **Settings → Change
+password** before exposing the CMS publicly.
 
 ---
 
@@ -156,7 +150,6 @@ Secrets (via `.dev.vars` locally, `wrangler pages secret put` in production):
 | Secret                 | Purpose                                              |
 | ---------------------- | ---------------------------------------------------- |
 | `SESSION_SECRET`       | Salts the IP hashes used by the admin rate limiter   |
-| `SETUP_TOKEN`          | Gate for the one-time owner creation route           |
 
 Shipping rates, store details, promo bar, hero slides and similar content are
 edited in `/admin` and stored in D1 (`settings` table), overriding the
@@ -190,7 +183,7 @@ Public (all under `/api`):
 
 Admin (all under `/api/admin`, session cookie required except auth routes):
 
-- `GET /me`, `POST /setup`, `POST /login`, `POST /logout`, `POST /password`
+- `GET /me`, `POST /login`, `POST /logout`, `POST /password`
 - `GET /dashboard?range=7d|30d|90d`
 - CRUD for `products` (plus `bulk`, `duplicate`), `categories` (+ `reorder`),
   `orders` (+ `export.csv`), `promos`, `reviews`, `submissions`

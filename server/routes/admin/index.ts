@@ -20,7 +20,7 @@ import artwork from "./artwork";
 
 const app = new Hono<AppEnv>();
 
-// /setup, /login, /logout, /me (and /password, which guards itself).
+// /login, /logout, /me (and /password, which guards itself).
 app.route("/", auth);
 
 // Everything else requires a valid admin session.

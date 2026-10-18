@@ -18,17 +18,6 @@ export function useLogin() {
   });
 }
 
-export function useSetup() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ token, ...body }) =>
-      api("/admin/setup", { method: "POST", body, headers: { "X-Setup-Token": token } }).then(
-        (r) => r.data,
-      ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
-  });
-}
-
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({

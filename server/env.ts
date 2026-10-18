@@ -9,7 +9,6 @@ export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
   SESSION_SECRET: string;
-  SETUP_TOKEN: string;
   TURNSTILE_SECRET?: string;
   SITE_URL: string;
   /** Dial code used when a phone number arrives without a country code. */
