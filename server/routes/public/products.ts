@@ -166,6 +166,7 @@ type ProductDetailRow = {
   review_count: number;
   category_slug: string | null;
   category_name: string | null;
+  size_chart_id: string | null;
 };
 
 /** GET /products/:slug — full product detail. */
@@ -183,7 +184,7 @@ app.get("/:slug", async (c) => {
   );
   if (!product) throw ApiError.notFound("Product not found");
 
-  const [images, variants, relations, distribution] = await Promise.all([
+  const [images, variants, relations, distribution, sizeChartRow] = await Promise.all([
     all<{
       color_name: string | null;
       key: string;
@@ -214,6 +215,13 @@ app.get("/:slug", async (c) => {
         WHERE product_id = ? AND status = 'approved' GROUP BY rating`,
       [product.id],
     ),
+    product.size_chart_id
+      ? first<{ id: string; title: string; unit: string; sizes: string; measurements: string }>(
+          env.DB,
+          "SELECT id, title, unit, sizes, measurements FROM size_charts WHERE id = ?",
+          [product.size_chart_id],
+        )
+      : Promise.resolve(null),
   ]);
 
   const relatedIds = relations.map((r) => r.related_id);
@@ -251,6 +259,18 @@ app.get("/:slug", async (c) => {
     customizable: !!product.customizable,
     printAddonCents: product.print_addon_cents,
     features,
+    sizeChart: sizeChartRow
+      ? {
+          id: sizeChartRow.id,
+          title: sizeChartRow.title,
+          unit: sizeChartRow.unit,
+          sizes: safeJson<string[]>(sizeChartRow.sizes, []),
+          measurements: safeJson<Record<string, (string | number)[]>>(
+            sizeChartRow.measurements,
+            {},
+          ),
+        }
+      : null,
     seo: { title: product.seo_title, description: product.seo_description },
     rating: { average: product.rating_avg, count: product.review_count, distribution: dist },
     images: images.map((img) => ({

@@ -9,6 +9,7 @@ const NAV = [
   ["Dashboard", "/admin", true],
   ["Products", "/admin/products"],
   ["Categories", "/admin/categories"],
+  ["Size charts", "/admin/size-charts"],
   ["Media", "/admin/media"],
   ["Orders", "/admin/orders"],
   ["Reviews", "/admin/reviews"],

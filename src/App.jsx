@@ -9,6 +9,7 @@ const Dashboard = lazy(() => import("./admin/Dashboard"));
 const Products = lazy(() => import("./admin/Products"));
 const ProductEditor = lazy(() => import("./admin/ProductEditor"));
 const Categories = lazy(() => import("./admin/Categories"));
+const SizeCharts = lazy(() => import("./admin/SizeCharts"));
 const Media = lazy(() => import("./admin/Media"));
 const Orders = lazy(() => import("./admin/Orders"));
 const OrderDetail = lazy(() => import("./admin/OrderDetail"));
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="products/new" element={<Page><ProductEditor /></Page>} />
           <Route path="products/:id" element={<Page><ProductEditor /></Page>} />
           <Route path="categories" element={<Page><Categories /></Page>} />
+          <Route path="size-charts" element={<Page><SizeCharts /></Page>} />
           <Route path="media" element={<Page><Media /></Page>} />
           <Route path="orders" element={<Page><Orders /></Page>} />
           <Route path="orders/:id" element={<Page><OrderDetail /></Page>} />

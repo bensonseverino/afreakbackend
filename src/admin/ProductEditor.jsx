@@ -134,6 +134,9 @@ export default function ProductEditor() {
     return o && o > p ? Math.round(((o - p) / o) * 100) : 0;
   }, [form.price_cents, form.old_price_cents]);
 
+  const selectedChart =
+    (sizeCharts.data ?? []).find((c) => c.id === form.sizeChartId) ?? null;
+
   const toPayload = () => ({
     name: form.name,
     slug: form.slug || undefined,
@@ -301,7 +304,14 @@ export default function ProductEditor() {
               ))}
             </Select>
           </Field>
-          <Field label="Size chart">
+          <Field
+            label="Size chart"
+            hint={
+              sizeCharts.data?.length === 0
+                ? "No charts yet — create one under Size charts."
+                : "Optional — shown on the product page."
+            }
+          >
             <Select
               value={form.sizeChartId ?? ""}
               onChange={(e) => update({ sizeChartId: e.target.value || null })}
@@ -338,6 +348,37 @@ export default function ProductEditor() {
             <Checkbox label="New" checked={form.isNew} onChange={(e) => update({ isNew: e.target.checked })} />
             <Checkbox label="Featured" checked={form.featured} onChange={(e) => update({ featured: e.target.checked })} />
           </div>
+          {selectedChart && (
+            <div className="overflow-x-auto border border-line lg:col-span-2">
+              <table className="w-full border-collapse text-left text-[13px]">
+                <thead>
+                  <tr className="border-b border-line bg-mist">
+                    <th className="label px-3 py-2 text-stone">Measurement</th>
+                    {(selectedChart.sizes ?? []).map((size, i) => (
+                      <th key={`${size}-${i}`} className="label px-3 py-2 text-stone">
+                        {size}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(selectedChart.measurements ?? {}).map(([name, values]) => (
+                    <tr key={name} className="border-b border-line last:border-0">
+                      <td className="px-3 py-2">{name}</td>
+                      {(selectedChart.sizes ?? []).map((size, i) => (
+                        <td key={`${size}-${i}`} className="px-3 py-2 text-stone">
+                          {values[i] ?? "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="border-t border-line px-3 py-2 text-[12px] text-stone">
+                {selectedChart.title} · {selectedChart.unit} · garment-side
+              </p>
+            </div>
+          )}
         </Card>
       )}
 
