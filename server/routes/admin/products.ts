@@ -155,6 +155,7 @@ const productSchema = z.object({
   featured: z.boolean().optional(),
   customizable: z.boolean().optional(),
   printAddonCents: z.coerce.number().int().min(0).optional(),
+  sizeChartId: z.string().trim().max(80).nullable().optional(),
   features: z.array(featureSchema).max(6).optional(),
   seoTitle: z.string().trim().max(200).nullable().optional(),
   seoDescription: z.string().trim().max(400).nullable().optional(),
@@ -244,9 +245,9 @@ app.post("/", async (c) => {
     {
       sql: `INSERT INTO products
               (slug, name, short_description, description, price_cents, old_price_cents, category_id,
-               status, is_new, is_featured, customizable, print_addon_cents, features_json,
+               status, is_new, is_featured, customizable, print_addon_cents, size_chart_id, features_json,
                seo_title, seo_description)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         slug,
         cleanText(input.name, 160),
@@ -260,6 +261,7 @@ app.post("/", async (c) => {
         input.featured ? 1 : 0,
         input.customizable ? 1 : 0,
         input.printAddonCents ?? 0,
+        input.sizeChartId ?? null,
         JSON.stringify(input.features ?? []),
         input.seoTitle ? cleanText(input.seoTitle, 200) : null,
         input.seoDescription ? cleanText(input.seoDescription, 400) : null,
@@ -291,7 +293,7 @@ app.put("/:id", async (c) => {
       sql: `UPDATE products SET
               slug = ?, name = ?, short_description = ?, description = ?, price_cents = ?,
               old_price_cents = ?, category_id = ?, status = ?, is_new = ?, is_featured = ?,
-              customizable = ?, print_addon_cents = ?, features_json = ?, seo_title = ?,
+              customizable = ?, print_addon_cents = ?, size_chart_id = ?, features_json = ?, seo_title = ?,
               seo_description = ?, updated_at = datetime('now')
             WHERE id = ?`,
       params: [
@@ -307,6 +309,7 @@ app.put("/:id", async (c) => {
         input.featured ? 1 : 0,
         input.customizable ? 1 : 0,
         input.printAddonCents ?? 0,
+        input.sizeChartId ?? null,
         JSON.stringify(input.features ?? []),
         input.seoTitle ? cleanText(input.seoTitle, 200) : null,
         input.seoDescription ? cleanText(input.seoDescription, 400) : null,
@@ -393,6 +396,7 @@ app.get("/:id", async (c) => {
     featured: !!product.is_featured,
     customizable: !!product.customizable,
     printAddonCents: product.print_addon_cents,
+    sizeChartId: product.size_chart_id ?? null,
     features: safeParse<unknown[]>(product.features_json as string, []),
     seoTitle: product.seo_title,
     seoDescription: product.seo_description,

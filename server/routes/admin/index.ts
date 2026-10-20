@@ -17,6 +17,7 @@ import content from "./content";
 import settings from "./settings";
 import users from "./users";
 import artwork from "./artwork";
+import sizeCharts from "./sizeCharts";
 
 const app = new Hono<AppEnv>();
 
@@ -41,6 +42,7 @@ protectedRoutes.route("/content", content);
 protectedRoutes.route("/settings", settings);
 protectedRoutes.route("/users", users);
 protectedRoutes.route("/artwork", artwork);
+protectedRoutes.route("/size-charts", sizeCharts);
 
 app.route("/", protectedRoutes);
 

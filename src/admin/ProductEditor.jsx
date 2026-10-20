@@ -35,6 +35,7 @@ const EMPTY = {
   featured: false,
   customizable: false,
   printAddonCents: 0,
+  sizeChartId: null,
   features: [],
   seoTitle: "",
   seoDescription: "",
@@ -99,6 +100,11 @@ export default function ProductEditor() {
     queryFn: () => api("/admin/categories").then((r) => r.data),
   });
 
+  const sizeCharts = useQuery({
+    queryKey: ["admin-size-charts"],
+    queryFn: () => api("/admin/size-charts").then((r) => r.data),
+  });
+
   useEffect(() => {
     if (product.data) {
       setForm({ ...EMPTY, ...product.data });
@@ -141,6 +147,7 @@ export default function ProductEditor() {
     featured: !!form.featured,
     customizable: !!form.customizable,
     printAddonCents: Number(form.printAddonCents) || 0,
+    sizeChartId: form.sizeChartId || null,
     features: form.features,
     seoTitle: form.seoTitle || null,
     seoDescription: form.seoDescription || null,
@@ -290,6 +297,19 @@ export default function ProductEditor() {
               {(categories.data ?? []).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Size chart">
+            <Select
+              value={form.sizeChartId ?? ""}
+              onChange={(e) => update({ sizeChartId: e.target.value || null })}
+            >
+              <option value="">— none —</option>
+              {(sizeCharts.data ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title}
                 </option>
               ))}
             </Select>
