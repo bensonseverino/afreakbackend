@@ -131,7 +131,7 @@ app.get("/:id", async (c) => {
 
   const items = await all<Record<string, unknown>>(
     c.env.DB,
-    `SELECT id, product_id, variant_id, name, color_name, size, qty, unit_price_cents, print_json
+    `SELECT id, product_id, variant_id, name, color_name, size, qty, unit_price_cents, print_json, sku, options_json, image_url
        FROM order_items WHERE order_id = ? ORDER BY id`,
     [id],
   );
@@ -165,6 +165,9 @@ app.get("/:id", async (c) => {
       qty: i.qty,
       unitPriceCents: i.unit_price_cents,
       print: safeParse<Record<string, unknown> | null>(i.print_json as string, null),
+      sku: i.sku,
+      optionsJson: i.options_json,
+      imageUrl: i.image_url,
     })),
   });
 });

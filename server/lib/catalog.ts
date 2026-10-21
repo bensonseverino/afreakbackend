@@ -38,6 +38,10 @@ export type ProductCard = {
   rating: number;
   reviewCount: number;
   category: { slug: string; name: string } | null;
+  // New fields for variant-aware cards
+  colorImages: Map<string, string>; // colorName -> primary image URL
+  priceFromCents: number | null; // lowest variant price if differs from base
+  soldOut: boolean;
 };
 
 const CARD_SELECT = `
@@ -98,7 +102,79 @@ export async function loadColors(env: Env, productIds: number[]): Promise<Map<nu
   return map;
 }
 
-export function toCard(row: CardRow, colors: Color[]): ProductCard {
+/** Load primary image per color for a set of products. Returns Map<productId, Map<colorName, imageUrl>>. */
+export async function loadColorImages(
+  env: Env,
+  productIds: number[],
+): Promise<Map<number, Map<string, string>>> {
+  const outer = new Map<number, Map<string, string>>();
+  if (!productIds.length) return outer;
+  const placeholders = productIds.map(() => "?").join(",");
+  const rows = await all<{ product_id: number; color_name: string; key: string; is_primary: number }>(
+    env.DB,
+    `SELECT v.product_id, v.color_name, m.key, pi.is_primary
+       FROM product_variants v
+       LEFT JOIN product_images pi
+         ON pi.product_id = v.product_id
+        AND (pi.option_value_id IN (
+               SELECT pov.id
+                 FROM product_options po
+                 JOIN product_option_values pov ON pov.option_id = po.id
+                WHERE po.product_id = v.product_id
+                  AND po.name = 'Color'
+                  AND pov.value = v.color_name
+             ) OR pi.color_name = v.color_name)
+       LEFT JOIN media m ON m.id = pi.media_id
+      WHERE v.product_id IN (${placeholders})
+      ORDER BY v.product_id, v.color_name, pi.is_primary DESC, pi.sort, pi.id`,
+    productIds,
+  );
+  for (const row of rows) {
+    const productMap = outer.get(row.product_id) ?? new Map<string, string>();
+    if (row.key && !productMap.has(row.color_name)) {
+      productMap.set(row.color_name, `/media/${row.key}`);
+    }
+    outer.set(row.product_id, productMap);
+  }
+  return outer;
+}
+
+/** Load minimum variant price per product (for "From X" display). */
+export async function loadMinVariantPrice(env: Env, productIds: number[]): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  if (!productIds.length) return map;
+  const placeholders = productIds.map(() => "?").join(",");
+  const rows = await all<{ product_id: number; min_price: number }>(
+    env.DB,
+    `SELECT v.product_id, MIN(COALESCE(v.price_cents, p.price_cents)) AS min_price
+       FROM product_variants v
+       JOIN products p ON p.id = v.product_id
+      WHERE v.product_id IN (${placeholders}) AND v.is_active = 1
+      GROUP BY v.product_id`,
+    productIds,
+  );
+  for (const row of rows) map.set(row.product_id, row.min_price);
+  return map;
+}
+
+/** Load whether all active variants of a product are out of stock (track_stock=1). */
+export async function loadSoldOut(env: Env, productIds: number[]): Promise<Map<number, boolean>> {
+  const map = new Map<number, boolean>();
+  if (!productIds.length) return map;
+  const placeholders = productIds.map(() => "?").join(",");
+  const rows = await all<{ product_id: number; has_stock: number }>(
+    env.DB,
+    `SELECT v.product_id, MAX(CASE WHEN v.is_active = 1 AND (v.track_stock = 0 OR v.stock > 0) THEN 1 ELSE 0 END) AS has_stock
+       FROM product_variants v
+      WHERE v.product_id IN (${placeholders})
+      GROUP BY v.product_id`,
+    productIds,
+  );
+  for (const row of rows) map.set(row.product_id, row.has_stock === 0);
+  return map;
+}
+
+export function toCard(row: CardRow, colors: Color[], colorImages: Map<string, string>, minPrice: number | null, soldOut: boolean): ProductCard {
   return {
     id: row.id,
     slug: row.slug,
@@ -119,11 +195,20 @@ export function toCard(row: CardRow, colors: Color[]): ProductCard {
       row.category_slug && row.category_name
         ? { slug: row.category_slug, name: row.category_name }
         : null,
+    colorImages,
+    priceFromCents: minPrice,
+    soldOut,
   };
 }
 
 /** Convenience: rows → cards with colors resolved. */
 export async function rowsToCards(env: Env, rows: CardRow[]): Promise<ProductCard[]> {
-  const colors = await loadColors(env, rows.map((r) => r.id));
-  return rows.map((r) => toCard(r, colors.get(r.id) ?? []));
+  const productIds = rows.map((r) => r.id);
+  const [colors, colorImages, minPrices, soldOutMap] = await Promise.all([
+    loadColors(env, productIds),
+    loadColorImages(env, productIds),
+    loadMinVariantPrice(env, productIds),
+    loadSoldOut(env, productIds),
+  ]);
+  return rows.map((r) => toCard(r, colors.get(r.id) ?? [], colorImages.get(r.id) ?? new Map(), minPrices.get(r.id) ?? null, soldOutMap.get(r.id) ?? false));
 }

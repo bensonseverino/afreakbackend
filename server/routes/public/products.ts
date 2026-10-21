@@ -5,7 +5,7 @@ import { all, count, first } from "../../lib/db";
 import { ApiError, ok } from "../../lib/http";
 import { parseQuery } from "../../lib/validate";
 import { imageShape } from "../../lib/media";
-import { listCardRows, rowsToCards } from "../../lib/catalog";
+import { listCardRows, rowsToCards, loadColorImages } from "../../lib/catalog";
 import { setPublicCache } from "../../middleware/cache";
 
 const app = new Hono<AppEnv>();
@@ -184,23 +184,63 @@ app.get("/:slug", async (c) => {
   );
   if (!product) throw ApiError.notFound("Product not found");
 
-  const [images, variants, relations, distribution, sizeChartRow] = await Promise.all([
+  const [options, images, variants, relations, distribution, sizeChartRow] = await Promise.all([
+    all<{
+      id: number;
+      name: string;
+      type: string;
+      position: number;
+      value_id: number | null;
+      value: string | null;
+      swatch_hex: string | null;
+      swatch_image_url: string | null;
+      value_position: number | null;
+    }>(
+      env.DB,
+      `SELECT po.id, po.name, po.type, po.position,
+              pov.id AS value_id, pov.value, pov.swatch_hex, pov.swatch_image_url,
+              pov.position AS value_position
+         FROM product_options po
+         LEFT JOIN product_option_values pov ON pov.option_id = po.id
+        WHERE po.product_id = ?
+        ORDER BY po.position, po.id, pov.position, pov.id`,
+      [product.id],
+    ),
     all<{
       color_name: string | null;
-      key: string;
+      option_value_id: number | null;
+      is_primary: number;
       alt: string | null;
+      key: string;
+      alt_m: string | null;
       width: number | null;
       height: number | null;
     }>(
       env.DB,
-      `SELECT pi.color_name, m.key, m.alt, m.width, m.height
+      `SELECT pi.color_name, pi.option_value_id, pi.is_primary, pi.alt,
+              m.key, m.alt AS alt_m, m.width, m.height
          FROM product_images pi JOIN media m ON m.id = pi.media_id
         WHERE pi.product_id = ? ORDER BY pi.sort, pi.id`,
       [product.id],
     ),
-    all<{ id: number; color_name: string; color_hex: string; size: string; sku: string | null; stock: number }>(
+    all<{
+      id: number;
+      color_name: string;
+      color_hex: string;
+      size: string;
+      sku: string | null;
+      stock: number;
+      option_value_ids: string | null;
+      price_cents: number | null;
+      compare_at_price_cents: number | null;
+      track_stock: number;
+      is_active: number;
+    }>(
       env.DB,
-      `SELECT id, color_name, color_hex, size, sku, stock FROM product_variants
+      `SELECT id, color_name, color_hex, size, sku, stock,
+              option_value_ids, price_cents, compare_at_price_cents,
+              track_stock, is_active
+         FROM product_variants
         WHERE product_id = ? ORDER BY color_name, size`,
       [product.id],
     ),
@@ -223,6 +263,32 @@ app.get("/:slug", async (c) => {
         )
       : Promise.resolve(null),
   ]);
+
+  // Group options + values
+  const optionMap = new Map<number, { id: number; name: string; type: "color" | "size" | "other"; position: number; values: Array<{ id: number; value: string; swatchHex: string | null; swatchImageUrl: string | null; position: number }> }>();
+  for (const row of options) {
+    let opt = optionMap.get(row.id);
+    if (!opt) {
+      opt = {
+        id: row.id,
+        name: row.name,
+        type: (row.type === "color" || row.type === "size" ? row.type : "other") as "color" | "size" | "other",
+        position: row.position,
+        values: [],
+      };
+      optionMap.set(row.id, opt);
+    }
+    if (row.value_id != null && row.value != null) {
+      opt.values.push({
+        id: row.value_id,
+        value: row.value,
+        swatchHex: row.swatch_hex,
+        swatchImageUrl: row.swatch_image_url,
+        position: row.value_position ?? opt.values.length,
+      });
+    }
+  }
+  const optionsArray = Array.from(optionMap.values()).sort((a, b) => a.position - b.position);
 
   const relatedIds = relations.map((r) => r.related_id);
   const relatedCards = relatedIds.length
@@ -273,11 +339,27 @@ app.get("/:slug", async (c) => {
       : null,
     seo: { title: product.seo_title, description: product.seo_description },
     rating: { average: product.rating_avg, count: product.review_count, distribution: dist },
+    options: optionsArray,
     images: images.map((img) => ({
       ...(imageShape(img) as object),
       colorName: img.color_name,
+      optionValueId: img.option_value_id,
+      isPrimary: !!img.is_primary,
+      alt: img.alt ?? img.alt_m,
     })),
-    variants,
+    variants: variants.map((v) => ({
+      id: v.id,
+      color_name: v.color_name,
+      color_hex: v.color_hex,
+      size: v.size,
+      sku: v.sku,
+      stock: v.stock,
+      optionValueIds: v.option_value_ids ? JSON.parse(v.option_value_ids) : [],
+      priceCents: v.price_cents,
+      compareAtPriceCents: v.compare_at_price_cents,
+      trackStock: !!v.track_stock,
+      isActive: !!v.is_active,
+    })),
     colors: dedupe(
       variants.map((v) => ({ name: v.color_name, hex: v.color_hex })),
       (v) => v.name,

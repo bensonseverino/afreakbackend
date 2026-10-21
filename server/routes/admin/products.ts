@@ -7,6 +7,7 @@ import { parseJson, cleanText } from "../../lib/validate";
 import { slugify, uniqueSlug } from "../../lib/slug";
 import { imageShape, mediaUrl } from "../../lib/media";
 import { setNoStore } from "../../middleware/cache";
+import { buildOptions, normalizeImages, type OptionDraft, type VariantDraft, type ImageDraft } from "../../lib/variations";
 
 const app = new Hono<AppEnv>();
 
@@ -122,9 +123,25 @@ const featureSchema = z.object({
   sub: z.string().trim().max(120).default(""),
 });
 
+const optionValueSchema = z.object({
+  value: z.string().trim().min(1).max(60),
+  swatchHex: z.string().trim().regex(/^#[0-9a-fA-F]{3,8}$/, "Invalid hex color").nullable().optional(),
+  swatchImageUrl: z.string().trim().max(500).nullable().optional(),
+  position: z.coerce.number().int().optional(),
+});
+
+const optionSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  type: z.enum(["color", "size", "other"]).default("other"),
+  position: z.coerce.number().int().optional(),
+  values: z.array(optionValueSchema).min(1).max(100),
+});
+
 const imageSchema = z.object({
   mediaId: z.string().min(1).max(80),
   colorName: z.string().trim().max(60).nullable().optional(),
+  alt: z.string().trim().max(300).nullable().optional(),
+  isPrimary: z.boolean().optional(),
   sort: z.coerce.number().int().optional(),
 });
 
@@ -134,6 +151,11 @@ const variantSchema = z.object({
   size: z.string().trim().min(1).max(30),
   sku: z.string().trim().max(80).optional(),
   stock: z.coerce.number().int().min(0).max(1_000_000),
+  priceCents: z.coerce.number().int().min(0).nullable().optional(),
+  compareAtPriceCents: z.coerce.number().int().min(0).nullable().optional(),
+  trackStock: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+  optionValues: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
 });
 
 const relationSchema = z.object({
@@ -159,6 +181,7 @@ const productSchema = z.object({
   features: z.array(featureSchema).max(6).optional(),
   seoTitle: z.string().trim().max(200).nullable().optional(),
   seoDescription: z.string().trim().max(400).nullable().optional(),
+  options: z.array(optionSchema).max(3).optional(),
   images: z.array(imageSchema).max(30).optional(),
   variants: z.array(variantSchema).max(500).optional(),
   relations: z.array(relationSchema).max(60).optional(),
@@ -187,20 +210,85 @@ function childStatements(
 ) {
   const { sql: pidSql, params: pidParams } = productRef;
 
-  statements.push({ sql: `DELETE FROM product_images WHERE product_id = ${pidSql}`, params: pidParams });
-  (input.images ?? []).forEach((img, index) => {
+  // 1. Options + values
+  const { options, variants } = buildOptions(input.variants ?? [], input.options);
+  statements.push({ sql: `DELETE FROM product_options WHERE product_id = ${pidSql}`, params: pidParams });
+  for (const option of options) {
     statements.push({
-      sql: `INSERT INTO product_images (product_id, media_id, color_name, sort)
+      sql: `INSERT INTO product_options (product_id, name, type, position)
             VALUES (${pidSql}, ?, ?, ?)`,
-      params: [...pidParams, img.mediaId, img.colorName ?? null, img.sort ?? index],
+      params: [...pidParams, option.name, option.type, option.position ?? 0],
     });
-  });
+    for (const value of option.values) {
+      statements.push({
+        sql: `INSERT INTO product_option_values (option_id, value, swatch_hex, swatch_image_url, position)
+              VALUES (
+                (SELECT id FROM product_options WHERE product_id = ${pidSql} AND name = ?),
+                ?, ?, ?, ?
+              )`,
+        params: [...pidParams, option.name, value.value, value.swatchHex ?? null, value.swatchImageUrl ?? null, value.position ?? 0],
+      });
+    }
+  }
 
+  // 2. Images (with option_value_id + is_primary + alt)
+  const normalizedImages = normalizeImages(input.images ?? [], options);
+  statements.push({ sql: `DELETE FROM product_images WHERE product_id = ${pidSql}`, params: pidParams });
+  for (const img of normalizedImages) {
+    const colorName = img.colorName;
+    const pidClause = `${pidSql}`;
+    // Resolve option_value_id via color value name (only for Color option)
+    let optionValueIdSql = "NULL";
+    let optionValueIdParams: unknown[] = [];
+    if (colorName) {
+      const colorOption = options.find((o) => o.type === "color");
+      if (colorOption) {
+        optionValueIdSql = `(SELECT pov.id
+           FROM product_options po
+           JOIN product_option_values pov ON pov.option_id = po.id
+          WHERE po.product_id = ${pidSql}
+            AND po.name = 'Color' AND pov.value = ?)`;
+        optionValueIdParams = [...pidParams, colorName];
+      }
+    }
+    const combinedParams = optionValueIdParams.length
+      ? [...pidParams, img.mediaId, colorName, img.sort, ...optionValueIdParams, img.isPrimary ? 1 : 0, img.alt]
+      : [...pidParams, img.mediaId, colorName, img.sort, img.isPrimary ? 1 : 0, img.alt];
+    const combinedSql = optionValueIdParams.length
+      ? `INSERT INTO product_images (product_id, media_id, color_name, sort, option_value_id, is_primary, alt)
+         VALUES (${pidSql}, ?, ?, ?, ${optionValueIdSql}, ?, ?)`
+      : `INSERT INTO product_images (product_id, media_id, color_name, sort, option_value_id, is_primary, alt)
+         VALUES (${pidSql}, ?, ?, ?, NULL, ?, ?)`;
+    statements.push({ sql: combinedSql, params: combinedParams });
+  }
+
+  // 3. Variants (with option_value_ids, price, compare_at, track_stock, is_active, position)
   statements.push({ sql: `DELETE FROM product_variants WHERE product_id = ${pidSql}`, params: pidParams });
-  for (const v of input.variants ?? []) {
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    // Build option_value_ids JSON array via subqueries in the order of options
+    const optionNames = options.map((o) => o.name);
+    const subqueryParts: string[] = [];
+    const subqueryParams: unknown[] = [];
+    for (const optName of optionNames) {
+      const pair = v.optionPairs.find((p) => p.name.toLowerCase() === optName.toLowerCase());
+      if (!pair) continue;
+      subqueryParts.push(`(
+        SELECT pov.id
+          FROM product_options po
+          JOIN product_option_values pov ON pov.option_id = po.id
+         WHERE po.product_id = ${pidSql}
+           AND po.name = ? AND pov.value = ?
+      )`);
+      subqueryParams.push(...pidParams, pair.name, pair.value);
+    }
+    const optionValueIdsSql = subqueryParts.length ? `json_array(${subqueryParts.join(",")})` : "'[]'";
+
     statements.push({
-      sql: `INSERT INTO product_variants (product_id, color_name, color_hex, size, sku, stock)
-            VALUES (${pidSql}, ?, ?, ?, ?, ?)`,
+      sql: `INSERT INTO product_variants
+            (product_id, color_name, color_hex, size, sku, stock,
+             option_value_ids, price_cents, compare_at_price_cents, track_stock, is_active, position)
+            VALUES (${pidSql}, ?, ?, ?, ?, ?, ${optionValueIdsSql}, ?, ?, ?, ?, ?)`,
       params: [
         ...pidParams,
         cleanText(v.colorName, 60),
@@ -208,10 +296,17 @@ function childStatements(
         cleanText(v.size, 30),
         v.sku ? cleanText(v.sku, 80) : autoSku(slug, v.colorName, v.size),
         v.stock,
+        ...subqueryParams,
+        v.priceCents ?? null,
+        v.compareAtPriceCents ?? null,
+        v.trackStock ? 1 : 1,
+        v.isActive ? 1 : 1,
+        i,
       ],
     });
   }
 
+  // 4. Relations
   statements.push({ sql: `DELETE FROM product_relations WHERE product_id = ${pidSql}`, params: pidParams });
   (input.relations ?? [])
     .filter((r) => r.relatedId)
@@ -335,27 +430,68 @@ app.get("/:id", async (c) => {
   );
   if (!product) throw ApiError.notFound("Product not found");
 
-  const [images, variants, relations] = await Promise.all([
+  const [options, images, variants, relations] = await Promise.all([
+    all<{
+      id: number;
+      name: string;
+      type: string;
+      position: number;
+      value_id: number | null;
+      value: string | null;
+      swatch_hex: string | null;
+      swatch_image_url: string | null;
+      value_position: number | null;
+    }>(
+      c.env.DB,
+      `SELECT po.id, po.name, po.type, po.position,
+              pov.id AS value_id, pov.value, pov.swatch_hex, pov.swatch_image_url,
+              pov.position AS value_position
+         FROM product_options po
+         LEFT JOIN product_option_values pov ON pov.option_id = po.id
+        WHERE po.product_id = ?
+        ORDER BY po.position, po.id, pov.position, pov.id`,
+      [id],
+    ),
     all<{
       id: number;
       media_id: string;
       color_name: string | null;
       sort: number;
-      key: string;
+      option_value_id: number | null;
+      is_primary: number;
       alt: string | null;
+      key: string;
+      alt_m: string | null;
       width: number | null;
       height: number | null;
       mime: string;
     }>(
       c.env.DB,
-      `SELECT pi.id, pi.media_id, pi.color_name, pi.sort, m.key, m.alt, m.width, m.height, m.mime
+      `SELECT pi.id, pi.media_id, pi.color_name, pi.sort, pi.option_value_id, pi.is_primary, pi.alt,
+              m.key, m.alt AS alt_m, m.width, m.height, m.mime
          FROM product_images pi JOIN media m ON m.id = pi.media_id
         WHERE pi.product_id = ? ORDER BY pi.sort, pi.id`,
       [id],
     ),
-    all<{ id: number; color_name: string; color_hex: string; size: string; sku: string | null; stock: number }>(
+    all<{
+      id: number;
+      color_name: string;
+      color_hex: string;
+      size: string;
+      sku: string | null;
+      stock: number;
+      option_value_ids: string | null;
+      price_cents: number | null;
+      compare_at_price_cents: number | null;
+      track_stock: number;
+      is_active: number;
+      position: number;
+    }>(
       c.env.DB,
-      `SELECT id, color_name, color_hex, size, sku, stock FROM product_variants
+      `SELECT id, color_name, color_hex, size, sku, stock,
+              option_value_ids, price_cents, compare_at_price_cents,
+              track_stock, is_active, position
+         FROM product_variants
         WHERE product_id = ? ORDER BY color_name, size`,
       [id],
     ),
@@ -371,6 +507,31 @@ app.get("/:id", async (c) => {
       [id],
     ),
   ]);
+
+  const optionMap = new Map<number, { id: number; name: string; type: "color" | "size" | "other"; position: number; values: Array<{ id: number; value: string; swatchHex: string | null; swatchImageUrl: string | null; position: number }> }>();
+  for (const row of options) {
+    let opt = optionMap.get(row.id);
+    if (!opt) {
+      opt = {
+        id: row.id,
+        name: row.name,
+        type: (row.type === "color" || row.type === "size" ? row.type : "other") as "color" | "size" | "other",
+        position: row.position,
+        values: [],
+      };
+      optionMap.set(row.id, opt);
+    }
+    if (row.value_id != null && row.value != null) {
+      opt.values.push({
+        id: row.value_id,
+        value: row.value,
+        swatchHex: row.swatch_hex,
+        swatchImageUrl: row.swatch_image_url,
+        position: row.value_position ?? opt.values.length,
+      });
+    }
+  }
+  const optionsArray = Array.from(optionMap.values()).sort((a, b) => a.position - b.position);
 
   const relShape = (type: string) =>
     relations
@@ -400,13 +561,16 @@ app.get("/:id", async (c) => {
     features: safeParse<unknown[]>(product.features_json as string, []),
     seoTitle: product.seo_title,
     seoDescription: product.seo_description,
+    options: optionsArray,
     images: images.map((i) => ({
       id: i.id,
       mediaId: i.media_id,
       colorName: i.color_name,
+      optionValueId: i.option_value_id,
+      isPrimary: !!i.is_primary,
+      alt: i.alt ?? i.alt_m,
       sort: i.sort,
       url: mediaUrl(i.key),
-      alt: i.alt,
       width: i.width,
       height: i.height,
       mime: i.mime,
@@ -418,6 +582,12 @@ app.get("/:id", async (c) => {
       size: v.size,
       sku: v.sku,
       stock: v.stock,
+      optionValueIds: v.option_value_ids ? JSON.parse(v.option_value_ids) : [],
+      priceCents: v.price_cents,
+      compareAtPriceCents: v.compare_at_price_cents,
+      trackStock: !!v.track_stock,
+      isActive: !!v.is_active,
+      position: v.position,
     })),
     pairWith: relShape("pair"),
     accessories: relShape("accessory"),
@@ -469,8 +639,8 @@ app.post("/:id/duplicate", async (c) => {
     c.env.DB,
     `INSERT INTO products
        (slug, name, short_description, description, price_cents, old_price_cents, category_id,
-        status, is_new, is_featured, customizable, print_addon_cents, features_json, seo_title, seo_description)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, 0, ?, ?, ?, ?, ?)`,
+        status, is_new, is_featured, customizable, print_addon_cents, features_json, seo_title, seo_description, size_chart_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, 0, ?, ?, ?, ?, ?, ?)`,
     [
       slug,
       `${src.name as string} copy`,
@@ -485,19 +655,40 @@ app.post("/:id/duplicate", async (c) => {
       src.features_json,
       src.seo_title,
       src.seo_description,
+      src.size_chart_id ?? null,
     ],
   );
   const newId = Number(insert.meta.last_row_id);
 
   await batch(c.env.DB, [
     {
-      sql: `INSERT INTO product_images (product_id, media_id, color_name, sort)
-            SELECT ?, media_id, color_name, sort FROM product_images WHERE product_id = ? ORDER BY sort, id`,
+      sql: `INSERT INTO product_options (product_id, name, type, position)
+            SELECT ?, name, type, position FROM product_options WHERE product_id = ? ORDER BY position, id`,
       params: [newId, id],
     },
     {
-      sql: `INSERT INTO product_variants (product_id, color_name, color_hex, size, sku, stock)
-            SELECT ?, color_name, color_hex, size, NULL, stock FROM product_variants WHERE product_id = ?`,
+      sql: `INSERT INTO product_option_values (option_id, value, swatch_hex, swatch_image_url, position)
+            SELECT
+              (SELECT o2.id FROM product_options o2 WHERE o2.product_id = ? AND o2.name = o.name),
+              pov.value, pov.swatch_hex, pov.swatch_image_url, pov.position
+            FROM product_option_values pov
+            JOIN product_options o ON o.id = pov.option_id
+            WHERE o.product_id = ?
+            ORDER BY pov.option_id, pov.position`,
+      params: [newId, id],
+    },
+    {
+      sql: `INSERT INTO product_images (product_id, media_id, color_name, sort, option_value_id, is_primary, alt)
+            SELECT ?, media_id, color_name, sort, option_value_id, is_primary, alt
+            FROM product_images WHERE product_id = ? ORDER BY sort, id`,
+      params: [newId, id],
+    },
+    {
+      sql: `INSERT INTO product_variants (product_id, color_name, color_hex, size, sku, stock,
+              option_value_ids, price_cents, compare_at_price_cents, track_stock, is_active, position)
+            SELECT ?, color_name, color_hex, size, NULL, stock,
+              option_value_ids, price_cents, compare_at_price_cents, track_stock, is_active, position
+            FROM product_variants WHERE product_id = ? ORDER BY color_name, size`,
       params: [newId, id],
     },
   ]);

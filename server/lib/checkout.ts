@@ -30,6 +30,8 @@ export type PricedLine = {
   available: boolean;
   image: ImageRef | null;
   print: PrintInput;
+  sku: string | null;
+  optionValueIds: number[];
 };
 
 export type QuoteIssue = {
@@ -76,6 +78,11 @@ type VariantRow = {
   image_alt: string | null;
   image_width: number | null;
   image_height: number | null;
+  variant_price_cents: number | null;
+  variant_compare_at_price_cents: number | null;
+  track_stock: number;
+  is_active: number;
+  option_value_ids: string | null;
 };
 
 async function loadVariants(env: Env, ids: number[]): Promise<Map<number, VariantRow>> {
@@ -86,11 +93,25 @@ async function loadVariants(env: Env, ids: number[]): Promise<Map<number, Varian
     env.DB,
     `SELECT v.id, v.product_id, v.color_name, v.size, v.stock,
             p.slug, p.name, p.price_cents, p.print_addon_cents, p.customizable, p.status,
-            m.key AS image_key, m.alt AS image_alt, m.width AS image_width, m.height AS image_height
+            m.key AS image_key, m.alt AS image_alt, m.width AS image_width, m.height AS image_height,
+            v.price_cents AS variant_price_cents, v.compare_at_price_cents AS variant_compare_at_price_cents,
+            v.track_stock, v.is_active, v.option_value_ids
        FROM product_variants v
        JOIN products p ON p.id = v.product_id
        LEFT JOIN product_images pi
-         ON pi.id = (SELECT id FROM product_images WHERE product_id = p.id ORDER BY sort, id LIMIT 1)
+         ON pi.id = (
+           SELECT pi2.id FROM product_images pi2
+            WHERE pi2.product_id = p.id
+              AND (pi2.option_value_id IN (
+                     SELECT pov.id
+                       FROM product_options po
+                       JOIN product_option_values pov ON pov.option_id = po.id
+                      WHERE po.product_id = p.id
+                        AND po.name = 'Color'
+                        AND pov.value = v.color_name
+                   ) OR pi2.color_name = v.color_name)
+            ORDER BY pi2.is_primary DESC, pi2.sort, pi2.id LIMIT 1
+         )
        LEFT JOIN media m ON m.id = pi.media_id
       WHERE v.id IN (${placeholders})`,
     ids,
@@ -129,6 +150,16 @@ export async function buildQuote(
       });
       return;
     }
+    if (!v.is_active) {
+      issues.push({
+        lineId,
+        variantId: v.id,
+        code: "UNAVAILABLE",
+        message: "This item is no longer available",
+        available: 0,
+      });
+      return;
+    }
 
     const qty = Math.max(1, Math.floor(item.qty));
     const wantsPrint = !!(item.print && (item.print.artworkKey || item.print.placement));
@@ -143,8 +174,15 @@ export async function buildQuote(
       });
     }
 
-    const unitPriceCents = v.price_cents + printAddonCents;
-    const available = v.stock >= qty;
+    const effectivePriceCents = v.variant_price_cents ?? v.price_cents;
+    const unitPriceCents = effectivePriceCents + printAddonCents;
+
+    let available: boolean;
+    if (!v.track_stock) {
+      available = true;
+    } else {
+      available = v.stock >= qty;
+    }
     if (!available) {
       issues.push({
         lineId,
@@ -165,7 +203,7 @@ export async function buildQuote(
       colorName: v.color_name,
       size: v.size,
       qty,
-      basePriceCents: v.price_cents,
+      basePriceCents: effectivePriceCents,
       printAddonCents,
       unitPriceCents,
       stock: v.stock,
@@ -176,6 +214,8 @@ export async function buildQuote(
           : null,
       ),
       print: wantsPrint ? (item.print ?? null) : null,
+      sku: null,
+      optionValueIds: v.option_value_ids ? JSON.parse(v.option_value_ids) : [],
     });
   });
 

@@ -142,8 +142,8 @@ app.post("/", optionalCustomer, orderLimiter, async (c) => {
   for (const line of quote.lines) {
     statements.push({
       sql: `INSERT INTO order_items
-              (order_id, product_id, variant_id, name, color_name, size, qty, unit_price_cents, print_json)
-            VALUES ((SELECT id FROM orders WHERE number = ?), ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (order_id, product_id, variant_id, name, color_name, size, qty, unit_price_cents, print_json, sku, options_json, image_url)
+            VALUES ((SELECT id FROM orders WHERE number = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         number,
         line.productId,
@@ -154,6 +154,9 @@ app.post("/", optionalCustomer, orderLimiter, async (c) => {
         line.qty,
         line.unitPriceCents,
         line.print ? JSON.stringify(line.print) : null,
+        line.sku,
+        JSON.stringify(line.optionValueIds),
+        line.image?.url ?? null,
       ],
     });
   }
@@ -161,7 +164,7 @@ app.post("/", optionalCustomer, orderLimiter, async (c) => {
   for (const line of quote.lines) {
     decrementIndexes.push(statements.length);
     statements.push({
-      sql: "UPDATE product_variants SET stock = stock - ? WHERE id = ? AND stock >= ?",
+      sql: "UPDATE product_variants SET stock = stock - ? WHERE id = ? AND (track_stock = 0 OR stock >= ?)",
       params: [line.qty, line.variantId, line.qty],
     });
   }
