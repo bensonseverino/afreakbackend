@@ -144,12 +144,14 @@ deploying schema changes.
 | `FREE_SHIPPING_THRESHOLD_CENTS`| `15000`                | Fallback if the `shipping` setting is unset |
 | `FLAT_SHIPPING_CENTS`          | `600`                  | Fallback flat rate                   |
 | `EXPRESS_SHIPPING_CENTS`       | `1200`                 | Fallback express rate                |
+| `RATES_TTL_HOURS`              | `6`                    | Hours a cached display rate stays fresh |
 
 Secrets (via `.dev.vars` locally, `wrangler pages secret put` in production):
 
 | Secret                 | Purpose                                              |
 | ---------------------- | ---------------------------------------------------- |
 | `SESSION_SECRET`       | Salts the IP hashes used by the admin rate limiter   |
+| `EXCHANGE_RATE_API_KEY`| Optional ExchangeRate-API key; without it the free `open.er-api.com` feed is used |
 
 Shipping rates, store details, promo bar, hero slides and similar content are
 edited in `/admin` and stored in D1 (`settings` table), overriding the

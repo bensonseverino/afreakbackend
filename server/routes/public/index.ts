@@ -11,6 +11,8 @@ import promo from "./promo";
 import checkout from "./checkout";
 import orders from "./orders";
 import track from "./track";
+import rates from "./rates";
+import geo from "./geo";
 
 const app = new Hono<AppEnv>();
 
@@ -28,5 +30,7 @@ app.route("/promo", promo);
 app.route("/checkout", checkout);
 app.route("/orders", orders);
 app.route("/track", track);
+app.route("/rates", rates);
+app.route("/geo", geo);
 
 export default app;

@@ -21,3 +21,5 @@ CURRENCY = "EUR"
 FREE_SHIPPING_THRESHOLD_CENTS = "15000"
 FLAT_SHIPPING_CENTS = "600"
 EXPRESS_SHIPPING_CENTS = "1200"
+# Display-rate cache lifetime. Currencies are display-only; checkout charges EUR.
+RATES_TTL_HOURS = "6"

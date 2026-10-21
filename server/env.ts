@@ -17,6 +17,10 @@ export type Env = {
   FREE_SHIPPING_THRESHOLD_CENTS: string;
   FLAT_SHIPPING_CENTS: string;
   EXPRESS_SHIPPING_CENTS?: string;
+  /** ExchangeRate-API key; when absent the free open.er-api.com feed is used. */
+  EXCHANGE_RATE_API_KEY?: string;
+  /** Hours a cached rate stays fresh before a refetch. Defaults to 6. */
+  RATES_TTL_HOURS?: string;
 };
 
 export type AdminRole = "owner" | "editor";

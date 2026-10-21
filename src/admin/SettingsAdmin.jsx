@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useMe, useChangePassword } from "../hooks/useAuth";
-import { centsToInput, parsePriceToCents } from "../lib/format";
+import { centsToInput, formatDateTime, parsePriceToCents } from "../lib/format";
 import {
   Badge,
   Button,
@@ -147,6 +147,85 @@ function PaymentSettings() {
         </div>
       )}
     />
+  );
+}
+
+/* --------------------------------------------------- exchange rates */
+const RATE_ORDER = ["EUR", "USD", "GBP", "KES"];
+
+function ExchangeRatesCard() {
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  const query = useQuery({
+    queryKey: ["exchange-rates"],
+    queryFn: () => api("/admin/rates").then((r) => r.data),
+  });
+
+  const refresh = useMutation({
+    mutationFn: () => api("/admin/rates/refresh", { method: "POST" }).then((r) => r.data),
+    onSuccess: (data) => {
+      qc.setQueryData(["exchange-rates"], data);
+      toast.push("Rates refreshed");
+    },
+    onError: (e) => toast.push(e.message, "danger"),
+  });
+
+  const data = query.data;
+  const rates = data?.rates ?? {};
+  const codes = RATE_ORDER;
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="label text-graphite">Exchange rates</p>
+          <p className="mt-1 text-[12px] text-stone">
+            Display-only: the storefront converts prices with these, checkout always charges EUR.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => refresh.mutate()}
+          disabled={refresh.isPending || query.isLoading}
+        >
+          {refresh.isPending ? "Refreshing…" : "Refresh now"}
+        </Button>
+      </div>
+
+      {query.isLoading ? (
+        <Spinner />
+      ) : query.isError ? (
+        <p className="mt-4 text-[13px] text-danger">{query.error.message}</p>
+      ) : (
+        <>
+          <dl className="mt-5 grid grid-cols-2 gap-2 text-[13px] sm:grid-cols-4">
+            {codes.map((code) => (
+              <div key={code} className="border border-line px-3 py-2">
+                <dt className="label text-graphite">{code}</dt>
+                <dd className="mt-1 text-ink">
+                  {rates[code] == null
+                    ? "—"
+                    : Number(rates[code]).toLocaleString("en", { maximumFractionDigits: 4 })}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[12px] text-graphite">
+            <span>Source: {data?.source ?? "—"}</span>
+            <span aria-hidden="true">·</span>
+            <span>Updated: {formatDateTime(data?.updatedAt)}</span>
+            {data?.stale && <Badge tone="stone">Stale — last known rates</Badge>}
+          </div>
+
+          <p className="mt-3 text-[11px] text-stone">
+            Provider quotes are per 1 USD and cached for RATES_TTL_HOURS.
+          </p>
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -319,6 +398,7 @@ export default function SettingsAdmin() {
         <StoreSettings />
         <ShippingSettings />
         <PaymentSettings />
+        <ExchangeRatesCard />
         <PasswordCard />
       </div>
 
