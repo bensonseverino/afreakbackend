@@ -84,9 +84,14 @@ app.post("/", optionalCustomer, orderLimiter, async (c) => {
   });
 
   const hardIssue = quote.issues.find(
-    (i) => i.code === "OUT_OF_STOCK" || i.code === "UNAVAILABLE",
+    (i) => i.code === "OUT_OF_STOCK" || i.code === "UNAVAILABLE" || i.code === "PRICE_MISSING",
   );
   if (hardIssue) {
+    if (hardIssue.code === "PRICE_MISSING") {
+      throw new ApiError(409, "PRICE_MISSING", hardIssue.message, {
+        details: { lineId: hardIssue.lineId, variantId: hardIssue.variantId },
+      });
+    }
     throw ApiError.conflict(hardIssue.message, {
       code: "OUT_OF_STOCK",
       details: { lineId: hardIssue.lineId, variantId: hardIssue.variantId, available: hardIssue.available },
@@ -142,8 +147,8 @@ app.post("/", optionalCustomer, orderLimiter, async (c) => {
   for (const line of quote.lines) {
     statements.push({
       sql: `INSERT INTO order_items
-              (order_id, product_id, variant_id, name, color_name, size, qty, unit_price_cents, print_json, sku, options_json, image_url)
-            VALUES ((SELECT id FROM orders WHERE number = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (order_id, product_id, variant_id, name, color_name, size, qty, unit_price_cents, print_json, sku, options_json, image_url, image_key)
+            VALUES ((SELECT id FROM orders WHERE number = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         number,
         line.productId,
@@ -157,6 +162,7 @@ app.post("/", optionalCustomer, orderLimiter, async (c) => {
         line.sku,
         JSON.stringify(line.optionValueIds),
         line.image?.url ?? null,
+        line.image?.url ? line.image.url.replace(/^\/media\//, "") : null,
       ],
     });
   }

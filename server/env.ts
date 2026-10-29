@@ -21,6 +21,18 @@ export type Env = {
   EXCHANGE_RATE_API_KEY?: string;
   /** Hours a cached rate stays fresh before a refetch. Defaults to 6. */
   RATES_TTL_HOURS?: string;
+  /** "production" | "preview" | "development" — surfaced by /api/health. */
+  APP_ENV?: string;
+  /** Branch treated as production; any other branch reports as preview (C-1). */
+  PRODUCTION_BRANCH?: string;
+  /** Optional explicit build id; falls back to the Pages commit sha. */
+  APP_BUILD_ID?: string;
+  /** Displayed by the admin diagnostics page. */
+  MEDIA_BUCKET_NAME?: string;
+  /* Injected by Cloudflare Pages at runtime. */
+  CF_PAGES_COMMIT_SHA?: string;
+  CF_PAGES_BRANCH?: string;
+  CF_PAGES_URL?: string;
 };
 
 export type AdminRole = "owner" | "editor";

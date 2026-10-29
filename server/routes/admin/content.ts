@@ -1,10 +1,12 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../../env";
 import { all, batch, first, run } from "../../lib/db";
 import { ApiError, ok } from "../../lib/http";
 import { parseJson, cleanText } from "../../lib/validate";
 import { imageShape } from "../../lib/media";
+import { touchContentStatement } from "../../lib/contentVersion";
 import { setNoStore } from "../../middleware/cache";
 
 const app = new Hono<AppEnv>();
@@ -119,15 +121,21 @@ app.put("/hero/:id", async (c) => {
   return ok(c, { id });
 });
 
-app.post("/hero/reorder", async (c) => {
+const reorderHero = async (c: Context<AppEnv>) => {
   setNoStore(c);
   const body = await parseJson(c, z.object({ ids: z.array(z.coerce.number().int().positive()).max(20) }));
-  await batch(
-    c.env.DB,
-    body.ids.map((id, index) => ({ sql: "UPDATE hero_slides SET sort = ? WHERE id = ?", params: [index, id] })),
-  );
+  await batch(c.env.DB, [
+    ...body.ids.map((id, index) => ({ sql: "UPDATE hero_slides SET sort = ? WHERE id = ?", params: [index, id] })),
+    touchContentStatement(),
+  ]);
   return ok(c, { reordered: true });
-});
+};
+
+// Both paths/verbs are kept: `/hero/reorder` (CMS) and `/hero-slides/reorder` (spec §7.1).
+app.post("/hero/reorder", reorderHero);
+app.put("/hero/reorder", reorderHero);
+app.post("/hero-slides/reorder", reorderHero);
+app.put("/hero-slides/reorder", reorderHero);
 
 app.delete("/hero/:id", async (c) => {
   setNoStore(c);
@@ -168,15 +176,20 @@ app.put("/lookbook/:id", async (c) => {
   return ok(c, { id });
 });
 
-app.post("/lookbook/reorder", async (c) => {
+const reorderLookbook = async (c: Context<AppEnv>) => {
   setNoStore(c);
   const body = await parseJson(c, z.object({ ids: z.array(z.coerce.number().int().positive()).max(50) }));
-  await batch(
-    c.env.DB,
-    body.ids.map((id, index) => ({ sql: "UPDATE lookbook_items SET sort = ? WHERE id = ?", params: [index, id] })),
-  );
+  await batch(c.env.DB, [
+    ...body.ids.map((id, index) => ({ sql: "UPDATE lookbook_items SET sort = ? WHERE id = ?", params: [index, id] })),
+    touchContentStatement(),
+  ]);
   return ok(c, { reordered: true });
-});
+};
+
+app.post("/lookbook/reorder", reorderLookbook);
+app.put("/lookbook/reorder", reorderLookbook);
+app.post("/lookbook-items/reorder", reorderLookbook);
+app.put("/lookbook-items/reorder", reorderLookbook);
 
 app.delete("/lookbook/:id", async (c) => {
   setNoStore(c);

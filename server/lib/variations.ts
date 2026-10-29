@@ -279,7 +279,9 @@ export function buildOptions(
     const pairs = pairsByIndex[index] ?? [];
     const colorPair = pairs.find((p) => p.name === colorOption?.name);
     const sizePair = pairs.find((p) => p.name === sizeOption?.name);
-    const colorName = variant.colorName || colorPair?.value || "Default";
+    // A product may have no colour at all (prints/posters): keep it empty
+    // instead of inventing a "Default" colour that would show up as a swatch.
+    const colorName = variant.colorName || colorPair?.value || "";
     const size = variant.size || sizePair?.value || "One size";
     const colorHex =
       variant.colorHex ||

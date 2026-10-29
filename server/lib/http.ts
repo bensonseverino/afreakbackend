@@ -10,6 +10,7 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "OUT_OF_STOCK"
+  | "PRICE_MISSING"
   | "RATE_LIMITED"
   | "CAPTCHA_FAILED"
   | "PAYLOAD_TOO_LARGE"

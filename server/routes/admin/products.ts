@@ -31,6 +31,12 @@ type AdminProductRow = {
   image_height: number | null;
   stock_total: number;
   variant_count: number;
+  size_type: string;
+  price_from_cents: number | null;
+  price_to_cents: number | null;
+  colors_json: string | null;
+  image_count: number;
+  missing_color_images: number;
 };
 
 const LIST_SELECT = `
@@ -38,7 +44,29 @@ const LIST_SELECT = `
          p.category_id, c.name AS category_name, c.slug AS category_slug,
          m.key AS image_key, m.alt AS image_alt, m.width AS image_width, m.height AS image_height,
          (SELECT COALESCE(SUM(stock), 0) FROM product_variants WHERE product_id = p.id) AS stock_total,
-         (SELECT COUNT(*) FROM product_variants WHERE product_id = p.id) AS variant_count
+         (SELECT COUNT(*) FROM product_variants WHERE product_id = p.id) AS variant_count,
+         p.size_type, p.price_from_cents, p.price_to_cents,
+         CASE WHEN EXISTS (SELECT 1 FROM product_options po WHERE po.product_id = p.id AND po.type = 'color')
+           THEN (SELECT json_group_array(json_object('name', pov.value, 'hex', COALESCE(pov.swatch_hex, '#000000')))
+                   FROM product_options po
+                   JOIN product_option_values pov ON pov.option_id = po.id
+                  WHERE po.product_id = p.id AND po.type = 'color' AND pov.value <> 'Default')
+           ELSE (SELECT json_group_array(json_object('name', cn, 'hex', ch))
+                   FROM (SELECT v.color_name AS cn, MIN(v.color_hex) AS ch
+                           FROM product_variants v
+                          WHERE v.product_id = p.id AND v.color_name NOT IN ('', 'Default')
+                          GROUP BY v.color_name))
+         END AS colors_json,
+         (SELECT COUNT(*) FROM product_images WHERE product_id = p.id) AS image_count,
+         (SELECT COUNT(*)
+            FROM product_option_values pov
+            JOIN product_options po ON po.id = pov.option_id
+           WHERE po.product_id = p.id AND po.type = 'color'
+             AND NOT EXISTS (
+               SELECT 1 FROM product_images pi
+                WHERE pi.product_id = p.id
+                  AND (pi.option_value_id = pov.id OR LOWER(pi.color_name) = LOWER(pov.value))
+             )) AS missing_color_images
     FROM products p
     LEFT JOIN categories c ON c.id = p.category_id
     LEFT JOIN product_images pi
@@ -110,6 +138,20 @@ app.get("/", async (c) => {
       ),
       stockTotal: Number(r.stock_total ?? 0),
       variantCount: Number(r.variant_count ?? 0),
+      sizeType: r.size_type ?? "apparel",
+      priceCents: Number(r.price_from_cents ?? r.price_cents ?? 0),
+      priceToCents: Number(r.price_to_cents ?? r.price_from_cents ?? r.price_cents ?? 0),
+      hasPriceRange:
+        Number(r.price_to_cents ?? 0) > Number(r.price_from_cents ?? 0),
+      colors: r.colors_json ? safeParse<Array<{ name: string; hex: string }>>(r.colors_json, []) : [],
+      readiness: {
+        noImage: Number(r.image_count ?? 0) === 0,
+        noVariants: Number(r.variant_count ?? 0) === 0,
+        priceMissing:
+          r.size_type === "print" &&
+          (Number(r.variant_count ?? 0) === 0 || Number(r.price_from_cents ?? 0) === 0),
+        colorWithoutImages: Number(r.missing_color_images ?? 0) > 0,
+      },
     })),
     { total, page, pages: Math.max(1, Math.ceil(total / limit)) },
   );
@@ -146,7 +188,8 @@ const imageSchema = z.object({
 });
 
 const variantSchema = z.object({
-  colorName: z.string().trim().min(1).max(60),
+  // Empty for products without colours (prints/posters).
+  colorName: z.string().trim().max(60).default(""),
   colorHex: z.string().trim().regex(/^#[0-9a-fA-F]{3,8}$/, "Invalid hex color"),
   size: z.string().trim().min(1).max(30),
   sku: z.string().trim().max(80).optional(),
@@ -169,8 +212,9 @@ const productSchema = z.object({
   slug: z.string().trim().max(80).optional(),
   shortDescription: z.string().trim().max(300).nullable().optional(),
   description: z.string().trim().max(20000).nullable().optional(),
-  price_cents: z.coerce.number().int().min(0),
+  price_cents: z.coerce.number().int().min(0).default(0),
   old_price_cents: z.coerce.number().int().min(0).nullable().optional(),
+  sizeType: z.enum(["apparel", "print", "one_size"]).default("apparel"),
   categoryId: z.coerce.number().int().positive().nullable().optional(),
   status: z.enum(STATUSES).default("draft"),
   isNew: z.boolean().optional(),
@@ -190,11 +234,47 @@ const productSchema = z.object({
 type ProductInput = z.infer<typeof productSchema>;
 
 function validateForPublish(input: ProductInput) {
-  if (input.status !== "published") return;
   const fields: Record<string, string> = {};
+  const variants = input.variants ?? [];
+  const sizeType = input.sizeType ?? "apparel";
+
+  // Price rules apply to every save, not just publishing.
+  for (const v of variants) {
+    if (v.priceCents != null && v.priceCents < 0) {
+      fields.variants = "Variant prices cannot be negative";
+    }
+    if (
+      v.compareAtPriceCents != null &&
+      (v.priceCents == null || v.compareAtPriceCents <= v.priceCents)
+    ) {
+      fields.variants = "Compare-at price must be greater than the variant price";
+    }
+  }
+  if (sizeType === "print" && variants.some((v) => !v.priceCents || v.priceCents <= 0)) {
+    fields.variants = "Every print size needs its own price";
+  }
+  const allVariantsPriced = variants.length > 0 && variants.every((v) => (v.priceCents ?? 0) > 0);
+  if (sizeType !== "print" && !(input.price_cents > 0) && !allVariantsPriced) {
+    fields.price_cents = "Set a base price, or a price on every variant";
+  }
+
+  if (input.status !== "published") {
+    if (Object.keys(fields).length) throw ApiError.validation(fields);
+    return;
+  }
+
   if ((input.images?.length ?? 0) < 1) fields.images = "Add at least one image to publish";
-  if ((input.variants?.length ?? 0) < 1) fields.variants = "Add at least one variant to publish";
-  if (!(input.price_cents > 0)) fields.price_cents = "Price must be greater than zero";
+  if (variants.length < 1) fields.variants = "Add at least one variant to publish";
+  if (!input.slug && !input.name) fields.slug = "A slug is required";
+
+  // Every colour must sell at least one size.
+  const colors = new Set(variants.map((v) => v.colorName.trim().toLowerCase()).filter(Boolean));
+  for (const color of colors) {
+    if (!variants.some((v) => v.colorName.trim().toLowerCase() === color)) {
+      fields.variants = `Colour ${color} has no variants`;
+    }
+  }
+
   if (Object.keys(fields).length) throw ApiError.validation(fields);
 }
 
@@ -253,7 +333,7 @@ function childStatements(
     }
     const combinedParams = optionValueIdParams.length
       ? [...pidParams, img.mediaId, colorName, img.sort, ...optionValueIdParams, img.isPrimary ? 1 : 0, img.alt]
-      : [...pidParams, img.mediaId, colorName, img.sort, img.isPrimary ? 1 : 0, img.alt];
+      : [...pidParams, img.mediaId, colorName || null, img.sort, img.isPrimary ? 1 : 0, img.alt];
     const combinedSql = optionValueIdParams.length
       ? `INSERT INTO product_images (product_id, media_id, color_name, sort, option_value_id, is_primary, alt)
          VALUES (${pidSql}, ?, ?, ?, ${optionValueIdSql}, ?, ?)`
@@ -306,7 +386,19 @@ function childStatements(
     });
   }
 
-  // 4. Relations
+  // 4. Denormalised price range (same batch, so it sees the new variants).
+  const basePrice = input.price_cents ?? 0;
+  statements.push({
+    sql: `UPDATE products SET
+            price_from_cents = (SELECT MIN(COALESCE(v.price_cents, ?)) FROM product_variants v
+                                  WHERE v.product_id = ${pidSql} AND v.is_active = 1),
+            price_to_cents = (SELECT MAX(COALESCE(v.price_cents, ?)) FROM product_variants v
+                                WHERE v.product_id = ${pidSql} AND v.is_active = 1)
+          WHERE id = ${pidSql}`,
+    params: [basePrice, ...pidParams, basePrice, ...pidParams, ...pidParams],
+  });
+
+  // 5. Relations
   statements.push({ sql: `DELETE FROM product_relations WHERE product_id = ${pidSql}`, params: pidParams });
   (input.relations ?? [])
     .filter((r) => r.relatedId)
@@ -341,14 +433,14 @@ app.post("/", async (c) => {
       sql: `INSERT INTO products
               (slug, name, short_description, description, price_cents, old_price_cents, category_id,
                status, is_new, is_featured, customizable, print_addon_cents, size_chart_id, features_json,
-               seo_title, seo_description)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               seo_title, seo_description, size_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         slug,
         cleanText(input.name, 160),
         input.shortDescription ? cleanText(input.shortDescription, 300) : null,
         input.description ?? null,
-        input.price_cents,
+        input.price_cents ?? 0,
         input.old_price_cents ?? null,
         input.categoryId ?? null,
         input.status,
@@ -360,6 +452,7 @@ app.post("/", async (c) => {
         JSON.stringify(input.features ?? []),
         input.seoTitle ? cleanText(input.seoTitle, 200) : null,
         input.seoDescription ? cleanText(input.seoDescription, 400) : null,
+        input.sizeType ?? "apparel",
       ],
     },
   ];
@@ -389,14 +482,14 @@ app.put("/:id", async (c) => {
               slug = ?, name = ?, short_description = ?, description = ?, price_cents = ?,
               old_price_cents = ?, category_id = ?, status = ?, is_new = ?, is_featured = ?,
               customizable = ?, print_addon_cents = ?, size_chart_id = ?, features_json = ?, seo_title = ?,
-              seo_description = ?, updated_at = datetime('now')
+              seo_description = ?, size_type = ?, updated_at = datetime('now')
             WHERE id = ?`,
       params: [
         slug,
         cleanText(input.name, 160),
         input.shortDescription ? cleanText(input.shortDescription, 300) : null,
         input.description ?? null,
-        input.price_cents,
+        input.price_cents ?? 0,
         input.old_price_cents ?? null,
         input.categoryId ?? null,
         input.status,
@@ -408,6 +501,7 @@ app.put("/:id", async (c) => {
         JSON.stringify(input.features ?? []),
         input.seoTitle ? cleanText(input.seoTitle, 200) : null,
         input.seoDescription ? cleanText(input.seoDescription, 400) : null,
+        input.sizeType ?? "apparel",
         id,
       ],
     },
@@ -551,6 +645,9 @@ app.get("/:id", async (c) => {
     description: product.description,
     price_cents: product.price_cents,
     old_price_cents: product.old_price_cents,
+    sizeType: product.size_type ?? "apparel",
+    priceFromCents: product.price_from_cents ?? product.price_cents,
+    priceToCents: product.price_to_cents ?? product.price_cents,
     categoryId: product.category_id,
     status: product.status,
     isNew: !!product.is_new,
@@ -639,8 +736,8 @@ app.post("/:id/duplicate", async (c) => {
     c.env.DB,
     `INSERT INTO products
        (slug, name, short_description, description, price_cents, old_price_cents, category_id,
-        status, is_new, is_featured, customizable, print_addon_cents, features_json, seo_title, seo_description, size_chart_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, 0, ?, ?, ?, ?, ?, ?)`,
+        status, is_new, is_featured, customizable, print_addon_cents, features_json, seo_title, seo_description, size_chart_id, size_type, price_from_cents, price_to_cents)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       slug,
       `${src.name as string} copy`,
@@ -656,6 +753,9 @@ app.post("/:id/duplicate", async (c) => {
       src.seo_title,
       src.seo_description,
       src.size_chart_id ?? null,
+      src.size_type ?? "apparel",
+      src.price_from_cents ?? null,
+      src.price_to_cents ?? null,
     ],
   );
   const newId = Number(insert.meta.last_row_id);

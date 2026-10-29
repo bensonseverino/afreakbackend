@@ -229,9 +229,9 @@ app.get("/:id", async (c) => {
            FROM orders WHERE customer_id = ?`,
         [row.id],
       ),
-      all<{ id: number; number: string; status: string; total_cents: number; created_at: string }>(
+      all<{ id: number; number: string; status: string; total_cents: number; currency: string; created_at: string }>(
         c.env.DB,
-        `SELECT id, number, status, total_cents, created_at FROM orders
+        `SELECT id, number, status, total_cents, currency, created_at FROM orders
           WHERE customer_id = ? ORDER BY created_at DESC LIMIT 20`,
         [row.id],
       ),
@@ -273,6 +273,7 @@ app.get("/:id", async (c) => {
       number: order.number,
       status: order.status,
       totalCents: order.total_cents,
+      currency: order.currency,
       createdAt: order.created_at,
     })),
     subscription: subscription ? { status: subscription.status, createdAt: subscription.created_at } : null,

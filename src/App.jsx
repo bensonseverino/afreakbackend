@@ -2,8 +2,17 @@ import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { useMe } from "./hooks/useAuth";
 import { Spinner, ToastProvider } from "./components/ui";
+import { CartProvider, StoreProvider } from "./storefront/context";
+import StorefrontLayout from "./storefront/StorefrontLayout";
 import AdminLayout from "./admin/AdminLayout";
 import AdminLogin from "./admin/AdminLogin";
+
+const Home = lazy(() => import("./storefront/Home"));
+const Shop = lazy(() => import("./storefront/Shop"));
+const Product = lazy(() => import("./storefront/Product"));
+const SizeGuide = lazy(() => import("./storefront/SizeGuide"));
+const Checkout = lazy(() => import("./storefront/Checkout"));
+const NotFound = lazy(() => import("./storefront/NotFound"));
 
 const Dashboard = lazy(() => import("./admin/Dashboard"));
 const Products = lazy(() => import("./admin/Products"));
@@ -21,6 +30,7 @@ const CustomerDetail = lazy(() => import("./admin/CustomerDetail"));
 const Promos = lazy(() => import("./admin/Promos"));
 const ContentAdmin = lazy(() => import("./admin/ContentAdmin"));
 const SettingsAdmin = lazy(() => import("./admin/SettingsAdmin"));
+const Diagnostics = lazy(() => import("./admin/Diagnostics"));
 
 function Page({ children }) {
   return (
@@ -47,7 +57,25 @@ export default function App() {
   return (
     <ToastProvider>
       <Routes>
-        <Route path="/" element={<Navigate to="/admin" replace />} />
+        {/* Storefront */}
+        <Route
+          element={
+            <StoreProvider>
+              <CartProvider>
+                <StorefrontLayout />
+              </CartProvider>
+            </StoreProvider>
+          }
+        >
+          <Route index element={<Page><Home /></Page>} />
+          <Route path="shop" element={<Page><Shop /></Page>} />
+          <Route path="product/:slug" element={<Page><Product /></Page>} />
+          <Route path="size-guide" element={<Page><SizeGuide /></Page>} />
+          <Route path="checkout" element={<Page><Checkout /></Page>} />
+          <Route path="*" element={<Page><NotFound /></Page>} />
+        </Route>
+
+        {/* Admin CMS */}
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin" element={<Protected />}>
           <Route index element={<Page><Dashboard /></Page>} />
@@ -67,8 +95,9 @@ export default function App() {
           <Route path="promos" element={<Page><Promos /></Page>} />
           <Route path="content" element={<Page><ContentAdmin /></Page>} />
           <Route path="settings" element={<Page><SettingsAdmin /></Page>} />
+          <Route path="diagnostics" element={<Page><Diagnostics /></Page>} />
         </Route>
-        <Route path="*" element={<Navigate to="/admin" replace />} />
+        <Route path="/admin/*" element={<Navigate to="/admin" replace />} />
       </Routes>
     </ToastProvider>
   );

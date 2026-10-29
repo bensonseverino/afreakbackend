@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { formatMoney, toMinor } from "../../shared/money.js";
 
 /* ---------------------------------------------------------------- Button */
 const BTN = {
@@ -40,6 +41,62 @@ const INPUT =
 
 export function TextInput({ className = "", ...props }) {
   return <input {...props} className={`${INPUT} ${className}`} />;
+}
+
+/**
+ * Money field in store minor units. The prefix shows the currency code; the
+ * typed value is echoed below exactly as the storefront will render it.
+ */
+export function MoneyInput({
+  value,
+  onChange,
+  currency = "KES",
+  locale = "en-KE",
+  allowEmpty = false,
+  showFormatted = true,
+  className = "",
+  placeholder,
+  ...props
+}) {
+  // `null` means "not being edited": show the value derived from props. While
+  // typing we keep the raw text so a trailing "." or "0" is not swallowed.
+  const [text, setText] = useState(null);
+  const display = text ?? (value == null ? "" : (value / 100).toString());
+
+  return (
+    <div className={className}>
+      <div className="flex items-stretch border border-line bg-card focus-within:border-ink">
+        <span className="label flex items-center border-r border-line px-2.5 text-stone">
+          {currency}
+        </span>
+        <input
+          {...props}
+          inputMode="decimal"
+          className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-[14px] text-ink outline-none"
+          placeholder={placeholder}
+          value={display}
+          onFocus={() => setText(value == null ? "" : (value / 100).toString())}
+          onBlur={() => setText(null)}
+          onChange={(e) => {
+            const raw = e.target.value.replace(/[^\d.]/g, "");
+            setText(raw);
+            if (raw === "") {
+              onChange?.(allowEmpty ? null : 0);
+            } else {
+              const [whole, ...rest] = raw.split(".");
+              const decimals = rest.join("").slice(0, 2);
+              onChange?.(toMinor(rest.length ? `${whole}.${decimals}` : whole));
+            }
+          }}
+        />
+      </div>
+      {showFormatted && (
+        <p className="mt-1 text-[11px] text-stone">
+          {value == null || text === "" ? "No amount" : formatMoney(value, currency, locale)}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function TextArea({ className = "", rows = 4, ...props }) {

@@ -14,12 +14,17 @@ binding = "MEDIA"
 bucket_name = "afreak-products"
 
 [vars]
+# Surfaced by /api/health and the admin diagnostics page.
+APP_ENV = "production"
+PRODUCTION_BRANCH = "main"
+MEDIA_BUCKET_NAME = "afreak-products"
 SITE_URL = "https://afreak.pages.dev"
 # Country used to normalise phone numbers typed without a country code.
 DEFAULT_PHONE_COUNTRY = "KE"
-CURRENCY = "EUR"
-FREE_SHIPPING_THRESHOLD_CENTS = "15000"
-FLAT_SHIPPING_CENTS = "600"
-EXPRESS_SHIPPING_CENTS = "1200"
-# Display-rate cache lifetime. Currencies are display-only; checkout charges EUR.
+CURRENCY = "KES"
+# Fallbacks only; the editable `shipping` setting wins.
+FREE_SHIPPING_THRESHOLD_CENTS = "1500000"
+FLAT_SHIPPING_CENTS = "50000"
+EXPRESS_SHIPPING_CENTS = "150000"
+# Display-rate cache lifetime. Currencies are display-only; checkout charges the store currency (KES).
 RATES_TTL_HOURS = "6"

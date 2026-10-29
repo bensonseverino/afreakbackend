@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { uploadMedia } from "../lib/imageUpload";
 import {
+  Badge,
   Button,
   Card,
   ConfirmDialog,
@@ -30,6 +31,7 @@ export default function Media() {
   const [page, setPage] = useState(1);
   const [alt, setAlt] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [missing, setMissing] = useState([]);
 
   const list = useQuery({
     queryKey: ["admin-media", q, page],
@@ -65,8 +67,25 @@ export default function Media() {
     onError: (e) => toast.push(e.message, "danger"),
   });
 
+  // Media health (§7.3): rows whose R2 object is gone. A CMS image that 404s
+  // is invisible on the storefront, so surface it here.
+  const health = useMutation({
+    mutationFn: () => api("/admin/media/health").then((r) => r.data),
+    onSuccess: (data) => {
+      setMissing(data?.missing ?? []);
+      toast.push(
+        data?.missing?.length
+          ? `${data.missing.length} file(s) missing from R2`
+          : `All ${data?.checked ?? 0} files present in R2`,
+        data?.missing?.length ? "danger" : "ink",
+      );
+    },
+    onError: (e) => toast.push(e.message, "danger"),
+  });
+
   const rows = list.data?.data ?? [];
   const meta = list.data?.meta;
+  const isMissing = (id) => missing.some((m) => m.id === id);
 
   const onFiles = (e) => {
     const files = [...(e.target.files ?? [])];
@@ -92,6 +111,9 @@ export default function Media() {
           <option value="hero">hero/</option>
           <option value="lookbook">lookbook/</option>
         </Select>
+        <Button variant="outline" onClick={() => health.mutate()} disabled={health.isPending}>
+          {health.isPending ? "Checking…" : "CHECK MEDIA"}
+        </Button>
         <Button onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
           {upload.isPending ? "Uploading…" : "Upload"}
         </Button>
@@ -123,6 +145,11 @@ export default function Media() {
             <img src={m.url} alt={m.alt ?? ""} className="h-40 w-full bg-mist object-cover" />
             <div className="p-3">
               <p className="truncate text-[12px] text-graphite">{m.filename || m.key}</p>
+              {isMissing(m.id) && (
+                <p className="mt-1">
+                  <Badge tone="danger">MISSING FILE</Badge>
+                </p>
+              )}
               <p className="mt-1 text-[11px] text-stone">
                 {humanSize(m.size)}
                 {m.width ? ` · ${m.width}×${m.height}` : ""}

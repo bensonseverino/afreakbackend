@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useMe, useChangePassword } from "../hooks/useAuth";
-import { centsToInput, formatDateTime, parsePriceToCents } from "../lib/format";
+import { formatDateTime } from "../lib/format";
 import {
   Badge,
   Button,
@@ -10,6 +10,7 @@ import {
   Checkbox,
   ConfirmDialog,
   Field,
+  MoneyInput,
   PageHeader,
   Select,
   Spinner,
@@ -91,6 +92,125 @@ function StoreSettings() {
   );
 }
 
+/* --------------------------------------------------- currency settings */
+const CURRENCIES = [
+  { code: "KES", locale: "en-KE" },
+  { code: "USD", locale: "en-US" },
+  { code: "EUR", locale: "de-DE" },
+  { code: "GBP", locale: "en-GB" },
+];
+
+function CurrencySettings() {
+  return (
+    <SettingsCard
+      settingKey="currency"
+      title="Store currency"
+      ownerOnly
+      render={(v, set) => (
+        <div className="space-y-3">
+          <Field label="Currency" hint="All prices, orders and exports use this code">
+            <Select
+              value={v.code ?? "KES"}
+              onChange={(e) => {
+                const match = CURRENCIES.find((c) => c.code === e.target.value);
+                set({ ...v, code: e.target.value, locale: match?.locale ?? v.locale });
+              }}
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <p className="border border-warn bg-mist p-3 text-[12px] text-warn">
+            Changing the currency does not convert existing amounts. Re-enter prices or run the
+            conversion script first.
+          </p>
+        </div>
+      )}
+    />
+  );
+}
+
+/* ------------------------------------------------------ size settings */
+function SizeSettings() {
+  return (
+    <SettingsCard
+      settingKey="size_presets"
+      title="Size presets"
+      ownerOnly
+      render={(v, set) => (
+        <div className="space-y-3">
+          {[
+            ["apparel", "Apparel sizes"],
+            ["print", "Print sizes"],
+            ["one_size", "One-size label"],
+          ].map(([key, label]) => (
+            <Field key={key} label={label} hint="Comma separated, in display order">
+              <TextInput
+                value={(v[key] ?? []).join(", ")}
+                onChange={(e) =>
+                  set({
+                    ...v,
+                    [key]: e.target.value
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </Field>
+          ))}
+        </div>
+      )}
+    />
+  );
+}
+
+const PRINT_DIMS = ["A4", "A3", "A2"];
+
+function SizeMetaSettings() {
+  return (
+    <SettingsCard
+      settingKey="size_meta"
+      title="Print size dimensions"
+      ownerOnly
+      render={(v, set) => (
+        <div className="space-y-3">
+          {PRINT_DIMS.map((label) => {
+            const dims = v[label] ?? { mm: [0, 0], in: [0, 0] };
+            const change = (unit, index, value) => {
+              const next = { ...dims, [unit]: [...(dims[unit] ?? [0, 0])] };
+              next[unit][index] = Number(value) || 0;
+              set({ ...v, [label]: next });
+            };
+            return (
+              <div key={label} className="grid grid-cols-[48px_1fr_1fr] items-center gap-2">
+                <span className="label text-graphite">{label}</span>
+                <Field label="mm (w × h)">
+                  <div className="flex items-center gap-1">
+                    <TextInput type="number" value={dims.mm?.[0] ?? 0} onChange={(e) => change("mm", 0, e.target.value)} />
+                    <span className="text-stone">×</span>
+                    <TextInput type="number" value={dims.mm?.[1] ?? 0} onChange={(e) => change("mm", 1, e.target.value)} />
+                  </div>
+                </Field>
+                <Field label="inches (w × h)">
+                  <div className="flex items-center gap-1">
+                    <TextInput type="number" step="0.1" value={Number((dims.in?.[0] ?? 0).toFixed(1))} onChange={(e) => change("in", 0, e.target.value)} />
+                    <span className="text-stone">×</span>
+                    <TextInput type="number" step="0.1" value={Number((dims.in?.[1] ?? 0).toFixed(1))} onChange={(e) => change("in", 1, e.target.value)} />
+                  </div>
+                </Field>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    />
+  );
+}
+
 /* --------------------------------------------------- shipping settings */
 function ShippingSettings() {
   return (
@@ -100,23 +220,26 @@ function ShippingSettings() {
       ownerOnly
       render={(v, set) => (
         <div className="space-y-3">
-          <Field label="Free-shipping threshold (EUR)" hint="Orders at or above this ship free">
-            <TextInput
-              value={centsToInput(v.threshold_cents)}
-              onChange={(e) => set({ ...v, threshold_cents: parsePriceToCents(e.target.value) })}
+          <Field label="Free-shipping threshold (KES)" hint="Orders at or above this ship free">
+            <MoneyInput
+              value={v.threshold_cents}
+              currency="KES"
+              onChange={(amount) => set({ ...v, threshold_cents: amount ?? 0 })}
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Flat rate (EUR)">
-              <TextInput
-                value={centsToInput(v.flat_cents)}
-                onChange={(e) => set({ ...v, flat_cents: parsePriceToCents(e.target.value) })}
+            <Field label="Flat rate (KES)">
+              <MoneyInput
+                value={v.flat_cents}
+                currency="KES"
+                onChange={(amount) => set({ ...v, flat_cents: amount ?? 0 })}
               />
             </Field>
-            <Field label="Express rate (EUR)">
-              <TextInput
-                value={centsToInput(v.express_cents)}
-                onChange={(e) => set({ ...v, express_cents: parsePriceToCents(e.target.value) })}
+            <Field label="Express rate (KES)">
+              <MoneyInput
+                value={v.express_cents}
+                currency="KES"
+                onChange={(amount) => set({ ...v, express_cents: amount ?? 0 })}
               />
             </Field>
           </div>
@@ -181,7 +304,7 @@ function ExchangeRatesCard() {
         <div>
           <p className="label text-graphite">Exchange rates</p>
           <p className="mt-1 text-[12px] text-stone">
-            Display-only: the storefront converts prices with these, checkout always charges EUR.
+            Display-only: the storefront converts prices with these, checkout always charges the store currency (KES).
           </p>
         </div>
         <Button
@@ -396,7 +519,10 @@ export default function SettingsAdmin() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <StoreSettings />
+        <CurrencySettings />
         <ShippingSettings />
+        <SizeSettings />
+        <SizeMetaSettings />
         <PaymentSettings />
         <ExchangeRatesCard />
         <PasswordCard />

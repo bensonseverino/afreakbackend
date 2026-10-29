@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { centsToInput, parsePriceToCents } from "../lib/format";
+import { centsToInput, formatPrice, parsePriceToCents } from "../lib/format";
 import {
   Badge,
   Button,
-  Card,
   Checkbox,
   ConfirmDialog,
   EmptyState,
@@ -98,9 +97,9 @@ export default function Promos() {
             <tr key={p.code} className="border-b border-line last:border-0">
               <td className="px-4 py-3 font-medium">{p.code}</td>
               <td className="px-4 py-3">
-                {p.type === "percent" ? `${p.value}%` : `${(p.value / 100).toFixed(2)} €`}
+                {p.type === "percent" ? `${p.value}%` : formatPrice(p.value)}
               </td>
-              <td className="px-4 py-3">{(p.minSubtotalCents / 100).toFixed(2)} €</td>
+              <td className="px-4 py-3">{formatPrice(p.minSubtotalCents)}</td>
               <td className="px-4 py-3">
                 {p.uses}
                 {p.maxUses ? ` / ${p.maxUses}` : ""}
@@ -168,7 +167,7 @@ export default function Promos() {
                   <option value="fixed">Fixed amount</option>
                 </Select>
               </Field>
-              <Field label={editing.form.type === "percent" ? "Percent off" : "Amount (EUR)"}>
+              <Field label={editing.form.type === "percent" ? "Percent off" : "Amount (KES)"}>
                 <TextInput
                   value={editing.form.value}
                   onChange={(e) => setEditing((s) => ({ ...s, form: { ...s.form, value: e.target.value } }))}
@@ -176,7 +175,7 @@ export default function Promos() {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Min order (EUR)">
+              <Field label="Min order (KES)">
                 <TextInput
                   value={editing.form.minSubtotalCents}
                   onChange={(e) =>

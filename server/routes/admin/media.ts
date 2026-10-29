@@ -100,6 +100,32 @@ app.post("/", async (c) => {
   return ok(c, created);
 });
 
+/**
+ * GET /admin/media/health — every media row whose R2 object is missing (§7.3).
+ * Used by the Media page badge and by `scripts/e2e-cms-check.mjs`.
+ */
+app.get("/health", async (c) => {
+  setNoStore(c);
+  const rows = await all<{ id: string; key: string; filename: string | null }>(
+    c.env.DB,
+    "SELECT id, key, filename FROM media ORDER BY created_at DESC LIMIT 500",
+  );
+
+  const missing: Array<{ id: string; key: string; filename: string | null }> = [];
+  const chunk = 25;
+  for (let i = 0; i < rows.length; i += chunk) {
+    const slice = rows.slice(i, i + chunk);
+    const heads = await Promise.all(
+      slice.map((row) => c.env.MEDIA.head(row.key).catch(() => null)),
+    );
+    slice.forEach((row, index) => {
+      if (!heads[index]) missing.push(row);
+    });
+  }
+
+  return ok(c, { checked: rows.length, missing });
+});
+
 /** PATCH /admin/media/:id — update alt text. */
 app.patch("/:id", async (c) => {
   setNoStore(c);

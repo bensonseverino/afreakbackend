@@ -189,13 +189,37 @@ export default function Products() {
                         {p.name}
                       </Link>
                       <span className="text-[12px] text-stone">{p.slug}</span>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {p.colors?.slice(0, 4).map((c) => (
+                          <span
+                            key={c.name}
+                            title={c.name}
+                            className="h-2.5 w-2.5 rounded-full border border-line"
+                            style={{ background: c.hex }}
+                          />
+                        ))}
+                        {p.colors?.length > 4 && (
+                          <span className="text-[10px] text-stone">+{p.colors.length - 4}</span>
+                        )}
+                        {p.sizeType === "print" && <Badge tone="solid">PRINT</Badge>}
+                        {p.readiness?.noImage && <Badge tone="danger">NO IMAGE</Badge>}
+                        {p.readiness?.noVariants && <Badge tone="danger">NO VARIANTS</Badge>}
+                        {p.readiness?.priceMissing && <Badge tone="danger">PRICE MISSING</Badge>}
+                        {p.readiness?.colorWithoutImages && (
+                          <Badge tone="warn">COLOUR WITHOUT IMAGES</Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </td>
                 <td className="px-4 py-3">
                   <Badge tone={statusTone(p.status)}>{p.status}</Badge>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">{formatPrice(p.price_cents)}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {p.hasPriceRange
+                    ? `FROM ${formatPrice(p.priceCents)}`
+                    : formatPrice(p.priceCents ?? p.price_cents)}
+                </td>
                 <td className="px-4 py-3">
                   <span className={p.stockTotal === 0 ? "text-danger" : ""}>{p.stockTotal}</span>
                 </td>

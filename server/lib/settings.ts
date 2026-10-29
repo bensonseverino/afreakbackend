@@ -1,7 +1,7 @@
-/** Typed access to the `settings` table with sane defaults. */
+/** Typed access to the `settings` table with sane defaults (KES). */
 import type { Env } from "../env";
 import { all, run } from "./db";
-import { parseCents, type ShippingConfig } from "./money";
+import { parseCents, type CurrencyConfig, type ShippingConfig, DEFAULT_CURRENCY } from "./money";
 
 export type SettingsValues = Record<string, unknown>;
 
@@ -9,18 +9,31 @@ const DEFAULTS: SettingsValues = {
   store: {
     name: "AFREAK",
     email: "hello@afreak.com",
+    currency: "KES",
     social: { instagram: "", tiktok: "", x: "", youtube: "" },
   },
+  currency: { code: "KES", locale: "en-KE", symbol: "KES" },
   promo_bar: { text: "", active: false },
-  shipping: { threshold_cents: 15000, flat_cents: 600, express_cents: 1200 },
+  shipping: { threshold_cents: 1500000, flat_cents: 50000, express_cents: 150000 },
   shipping_banner: {
     title: "Free shipping",
-    subtitle: "On all orders over €150",
+    subtitle: "On all orders over KES 15,000",
     cta_label: "Shop now",
     cta_url: "/shop",
   },
+  size_presets: {
+    apparel: ["XS", "S", "M", "L", "XL", "XXL"],
+    print: ["A4", "A3", "A2"],
+    one_size: ["One size"],
+  },
+  size_meta: {
+    A4: { mm: [210, 297], in: [8.3, 11.7] },
+    A3: { mm: [297, 420], in: [11.7, 16.5] },
+    A2: { mm: [420, 594], in: [16.5, 23.4] },
+  },
   showcase: { product_id: null },
   footer: { blurb: "Technical details meet minimal aesthetics." },
+  menu_feature: { eyebrow: "", title: "", url: "/shop?new=1", image: null },
   demo_payment: { enabled: false },
 };
 
@@ -61,8 +74,30 @@ export async function putSetting(env: Env, key: string, value: unknown): Promise
 export function shippingConfig(env: Env, settings: SettingsValues): ShippingConfig {
   const s = (settings.shipping ?? {}) as Record<string, unknown>;
   return {
-    thresholdCents: Number(s.threshold_cents ?? parseCents(env.FREE_SHIPPING_THRESHOLD_CENTS, 15000)),
-    flatCents: Number(s.flat_cents ?? parseCents(env.FLAT_SHIPPING_CENTS, 600)),
-    expressCents: Number(s.express_cents ?? parseCents(env.EXPRESS_SHIPPING_CENTS, 1200)),
+    thresholdCents: Number(s.threshold_cents ?? parseCents(env.FREE_SHIPPING_THRESHOLD_CENTS, 1500000)),
+    flatCents: Number(s.flat_cents ?? parseCents(env.FLAT_SHIPPING_CENTS, 50000)),
+    expressCents: Number(s.express_cents ?? parseCents(env.EXPRESS_SHIPPING_CENTS, 150000)),
   };
+}
+
+/**
+ * Store currency. `currency` setting wins, then `store.currency`, then env.
+ * KES / en-KE is the default when nothing is configured.
+ */
+export function currencyConfig(env: Env, settings: SettingsValues): CurrencyConfig {
+  const c = (settings.currency ?? {}) as Record<string, unknown>;
+  const store = (settings.store ?? {}) as Record<string, unknown>;
+  const code =
+    (typeof c.code === "string" && c.code) ||
+    (typeof store.currency === "string" && store.currency) ||
+    env.CURRENCY ||
+    DEFAULT_CURRENCY.code;
+  const locale =
+    (typeof c.locale === "string" && c.locale) || DEFAULT_CURRENCY.locale;
+  return { code: code.toUpperCase(), locale };
+}
+
+/** Loads just the currency (cached by the caller's single settings read when possible). */
+export async function getCurrency(env: Env): Promise<CurrencyConfig> {
+  return currencyConfig(env, await getSettings(env, ["currency", "store"]));
 }

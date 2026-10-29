@@ -3,13 +3,16 @@ import type { AppEnv } from "../../env";
 import { all } from "../../lib/db";
 import { ok } from "../../lib/http";
 import { imageShape } from "../../lib/media";
-import { setPublicCache } from "../../middleware/cache";
+import { getContentVersion } from "../../lib/contentVersion";
+import { setContentCache } from "../../middleware/cache";
 
 const app = new Hono<AppEnv>();
 
 /** All categories with a published product count and optional image. */
 app.get("/", async (c) => {
-  setPublicCache(c);
+  const version = await getContentVersion(c.env);
+  if (setContentCache(c, version)) return c.body(null, 304);
+
   const rows = await all<{
     slug: string;
     name: string;

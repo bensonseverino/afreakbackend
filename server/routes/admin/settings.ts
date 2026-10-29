@@ -6,19 +6,12 @@ import { parseJson } from "../../lib/validate";
 import { getSetting, putSetting } from "../../lib/settings";
 import { requireOwner } from "../../middleware/auth";
 import { setNoStore } from "../../middleware/cache";
+import { EDITABLE_SETTINGS_KEYS } from "../../../shared/settingsKeys.js";
 
 const app = new Hono<AppEnv>();
 
-/** Keys the CMS may read/write through this endpoint. */
-const ALLOWED_KEYS = [
-  "store",
-  "promo_bar",
-  "shipping",
-  "shipping_banner",
-  "showcase",
-  "footer",
-  "demo_payment",
-] as const;
+/** Keys the CMS may read/write (single source of truth: shared/settingsKeys.js). */
+const ALLOWED_KEYS = EDITABLE_SETTINGS_KEYS;
 
 function assertKey(key: string) {
   if (!(ALLOWED_KEYS as readonly string[]).includes(key)) {

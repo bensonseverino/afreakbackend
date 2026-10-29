@@ -5,6 +5,7 @@ import categories from "./categories";
 import products from "./products";
 import reviews from "./reviews";
 import home from "./home";
+import lookbook from "./lookbook";
 import forms from "./forms";
 import uploads from "./uploads";
 import promo from "./promo";
@@ -24,6 +25,7 @@ app.route("/products", products);
 app.route("/products", reviews);
 
 app.route("/home", home);
+app.route("/lookbook", lookbook);
 app.route("/forms", forms);
 app.route("/uploads", uploads);
 app.route("/promo", promo);

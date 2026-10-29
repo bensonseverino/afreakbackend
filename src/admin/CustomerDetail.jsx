@@ -217,7 +217,7 @@ export default function CustomerDetail() {
                     </Link>
                     <span className="text-[12px] text-stone">{o.status.replace("_", " ")}</span>
                     <span className="ml-auto whitespace-nowrap text-[13px]">
-                      {formatPrice(o.totalCents)}
+                      {formatPrice(o.totalCents, o.currency)}
                     </span>
                     <span className="whitespace-nowrap text-[12px] text-stone">
                       {formatDate(o.createdAt)}

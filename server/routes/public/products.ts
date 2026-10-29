@@ -5,8 +5,12 @@ import { all, count, first } from "../../lib/db";
 import { ApiError, ok } from "../../lib/http";
 import { parseQuery } from "../../lib/validate";
 import { imageShape } from "../../lib/media";
-import { listCardRows, rowsToCards, loadColorImages } from "../../lib/catalog";
-import { setPublicCache } from "../../middleware/cache";
+import { listCardRows, rowsToCards } from "../../lib/catalog";
+import { getContentVersion } from "../../lib/contentVersion";
+import { getSettings, currencyConfig } from "../../lib/settings";
+import { sizesFor, type SizeType } from "../../lib/sizes";
+import { slugify } from "../../lib/slug";
+import { setContentCache } from "../../middleware/cache";
 
 const app = new Hono<AppEnv>();
 
@@ -23,13 +27,15 @@ const listQuery = z.object({
   maxPrice: z.coerce.number().int().min(0).optional(),
   colors: z.string().max(400).optional(),
   sizes: z.string().max(400).optional(),
+  sizeType: z.enum(["apparel", "print", "one_size"]).optional(),
+  inStock: z.string().optional(),
 });
 
 const SORTS: Record<string, string> = {
   popular: "p.rating_avg DESC, p.review_count DESC, p.id DESC",
   newest: "p.created_at DESC, p.id DESC",
-  price_asc: "p.price_cents ASC, p.id DESC",
-  price_desc: "p.price_cents DESC, p.id DESC",
+  price_asc: "COALESCE(p.price_from_cents, p.price_cents) ASC, p.id DESC",
+  price_desc: "COALESCE(p.price_from_cents, p.price_cents) DESC, p.id DESC",
 };
 
 function csv(value: string | undefined): string[] {
@@ -42,7 +48,8 @@ function csv(value: string | undefined): string[] {
 
 /** GET /products — paginated product cards with filter facets. */
 app.get("/", async (c) => {
-  setPublicCache(c);
+  const version = await getContentVersion(c.env);
+  if (setContentCache(c, version)) return c.body(null, 304);
   const q = parseQuery(c.req.query(), listQuery);
 
   const where: string[] = ["p.status = 'published'"];
@@ -61,25 +68,32 @@ app.get("/", async (c) => {
   if (q.featured === "1") where.push("p.is_featured = 1");
   if (q.customizable === "1") where.push("p.customizable = 1");
   if (q.minPrice != null) {
-    where.push("p.price_cents >= ?");
+    where.push("COALESCE(p.price_from_cents, p.price_cents) >= ?");
     params.push(q.minPrice);
   }
   if (q.maxPrice != null) {
-    where.push("p.price_cents <= ?");
+    where.push("COALESCE(p.price_from_cents, p.price_cents) <= ?");
     params.push(q.maxPrice);
+  }
+  if (q.sizeType) {
+    where.push("p.size_type = ?");
+    params.push(q.sizeType);
   }
 
   const colors = csv(q.colors);
   if (colors.length) {
     where.push(
-      `p.id IN (SELECT product_id FROM product_variants WHERE color_name IN (${colors.map(() => "?").join(",")}))`,
+      `p.id IN (SELECT product_id FROM product_variants WHERE LOWER(color_name) IN (${colors
+        .map(() => "?")
+        .join(",")}))`,
     );
-    params.push(...colors);
+    params.push(...colors.map((c) => c.toLowerCase()));
   }
   const sizes = csv(q.sizes);
   if (sizes.length) {
+    const inStock = q.inStock === "1" || q.inStock === "true" ? " AND (track_stock = 0 OR stock > 0)" : "";
     where.push(
-      `p.id IN (SELECT product_id FROM product_variants WHERE size IN (${sizes.map(() => "?").join(",")}))`,
+      `p.id IN (SELECT product_id FROM product_variants WHERE size IN (${sizes.map(() => "?").join(",")})${inStock})`,
     );
     params.push(...sizes);
   }
@@ -111,7 +125,7 @@ app.get("/", async (c) => {
 
 /** Filter-sidebar facets for the shop page. */
 async function facets(env: AppEnv["Bindings"]) {
-  const [categories, colors, sizes, price] = await Promise.all([
+  const [categories, colors, sizes, price, sizeTypes] = await Promise.all([
     all<{ slug: string; name: string; n: number }>(
       env.DB,
       `SELECT c.slug, c.name, COUNT(p.id) AS n
@@ -119,12 +133,19 @@ async function facets(env: AppEnv["Bindings"]) {
          LEFT JOIN products p ON p.category_id = c.id AND p.status = 'published'
         GROUP BY c.id ORDER BY c.sort, c.name`,
     ),
-    all<{ color_name: string; hex: string }>(
+    all<{ name: string; hex: string }>(
       env.DB,
-      `SELECT v.color_name, MIN(v.color_hex) AS hex
+      `SELECT pov.value AS name, COALESCE(pov.swatch_hex, '#000000') AS hex
+         FROM product_option_values pov
+         JOIN product_options po ON po.id = pov.option_id
+         JOIN products p ON p.id = po.product_id
+        WHERE po.type = 'color' AND p.status = 'published' AND pov.value <> 'Default'
+        UNION
+       SELECT v.color_name AS name, MIN(v.color_hex) AS hex
          FROM product_variants v JOIN products p ON p.id = v.product_id
-        WHERE p.status = 'published'
-        GROUP BY v.color_name ORDER BY v.color_name`,
+        WHERE p.status = 'published' AND v.color_name <> 'Default' AND v.color_name <> ''
+        GROUP BY LOWER(v.color_name)
+        ORDER BY name`,
     ),
     all<{ size: string }>(
       env.DB,
@@ -133,15 +154,21 @@ async function facets(env: AppEnv["Bindings"]) {
     ),
     first<{ min_price: number | null; max_price: number | null }>(
       env.DB,
-      `SELECT MIN(price_cents) AS min_price, MAX(price_cents) AS max_price
+      `SELECT MIN(COALESCE(price_from_cents, price_cents)) AS min_price,
+              MAX(COALESCE(price_to_cents, price_cents)) AS max_price
          FROM products WHERE status = 'published'`,
+    ),
+    all<{ size_type: string }>(
+      env.DB,
+      `SELECT DISTINCT size_type FROM products WHERE status = 'published' ORDER BY size_type`,
     ),
   ]);
 
   return {
     categories: categories.map((r) => ({ slug: r.slug, name: r.name, count: Number(r.n) })),
-    colors: colors.map((r) => ({ name: r.color_name, hex: r.hex })),
+    colors: colors.map((r) => ({ name: r.name, slug: slugify(r.name), hex: r.hex ?? "#000000" })),
     sizes: sizes.map((r) => r.size),
+    sizeTypes: sizeTypes.map((r) => r.size_type),
     priceRange: { min: price?.min_price ?? 0, max: price?.max_price ?? 0 },
   };
 }
@@ -159,6 +186,9 @@ type ProductDetailRow = {
   is_featured: number;
   customizable: number;
   print_addon_cents: number;
+  size_type: string;
+  price_from_cents: number | null;
+  price_to_cents: number | null;
   features_json: string;
   seo_title: string | null;
   seo_description: string | null;
@@ -171,7 +201,8 @@ type ProductDetailRow = {
 
 /** GET /products/:slug — full product detail. */
 app.get("/:slug", async (c) => {
-  setPublicCache(c);
+  const version = await getContentVersion(c.env);
+  if (setContentCache(c, version)) return c.body(null, 304);
   const env = c.env;
   const slug = c.req.param("slug");
 
@@ -184,7 +215,7 @@ app.get("/:slug", async (c) => {
   );
   if (!product) throw ApiError.notFound("Product not found");
 
-  const [options, images, variants, relations, distribution, sizeChartRow] = await Promise.all([
+  const [options, images, variants, relations, distribution, sizeChartRow, settings] = await Promise.all([
     all<{
       id: number;
       name: string;
@@ -210,6 +241,7 @@ app.get("/:slug", async (c) => {
       color_name: string | null;
       option_value_id: number | null;
       is_primary: number;
+      sort: number;
       alt: string | null;
       key: string;
       alt_m: string | null;
@@ -217,7 +249,7 @@ app.get("/:slug", async (c) => {
       height: number | null;
     }>(
       env.DB,
-      `SELECT pi.color_name, pi.option_value_id, pi.is_primary, pi.alt,
+      `SELECT pi.color_name, pi.option_value_id, pi.is_primary, pi.sort, pi.alt,
               m.key, m.alt AS alt_m, m.width, m.height
          FROM product_images pi JOIN media m ON m.id = pi.media_id
         WHERE pi.product_id = ? ORDER BY pi.sort, pi.id`,
@@ -262,7 +294,12 @@ app.get("/:slug", async (c) => {
           [product.size_chart_id],
         )
       : Promise.resolve(null),
+    getSettings(env, ["currency", "size_presets", "size_meta", "store"]),
   ]);
+  const currency = currencyConfig(env, settings);
+  const sizeType = (product.size_type === "print" || product.size_type === "one_size"
+    ? product.size_type
+    : "apparel") as SizeType;
 
   // Group options + values
   const optionMap = new Map<number, { id: number; name: string; type: "color" | "size" | "other"; position: number; values: Array<{ id: number; value: string; swatchHex: string | null; swatchImageUrl: string | null; position: number }> }>();
@@ -308,6 +345,70 @@ app.get("/:slug", async (c) => {
 
   const features = safeJson<Array<Record<string, unknown>>>(product.features_json, []);
 
+  // Effective prices are server-authoritative: a variant price wins, otherwise
+  // the product's base price applies.
+  const effectiveVariants = variants.map((v) => ({
+    id: v.id,
+    color_name: v.color_name === "Default" ? "" : v.color_name,
+    color_hex: v.color_hex,
+    size: v.size,
+    sku: v.sku,
+    stock: v.stock,
+    optionValueIds: v.option_value_ids ? safeJson<number[]>(v.option_value_ids, []) : [],
+    priceCents: v.price_cents ?? product.price_cents,
+    oldPriceCents:
+      v.compare_at_price_cents ?? (v.price_cents == null ? product.old_price_cents : null),
+    hasOwnPrice: v.price_cents != null,
+    trackStock: !!v.track_stock,
+    isActive: !!v.is_active,
+  }));
+
+  const availableVariants = effectiveVariants.filter((v) => v.isActive);
+  const priced = availableVariants.filter(
+    (v) => v.priceCents > 0 && (sizeType !== "print" || v.hasOwnPrice),
+  );
+  const priceFrom =
+    product.price_from_cents ??
+    (priced.length ? Math.min(...priced.map((v) => v.priceCents)) : product.price_cents);
+  const priceTo =
+    product.price_to_cents ??
+    (priced.length ? Math.max(...priced.map((v) => v.priceCents)) : product.price_cents);
+
+  const colorOption = optionsArray.find((o) => o.type === "color");
+  const colors = colorOption
+    ? colorOption.values
+        .filter((v) => v.value !== "Default")
+        .map((v) => ({
+          id: v.id,
+          name: v.value,
+          slug: slugify(v.value),
+          hex: v.swatchHex ?? "#000000",
+          sort: v.position,
+        }))
+    : dedupe(
+        effectiveVariants
+          .filter((v) => v.color_name)
+          .map((v) => ({ name: v.color_name, hex: v.color_hex })),
+        (v) => v.name,
+      ).map((v, index) => ({
+        id: null,
+        name: v.name,
+        slug: slugify(v.name),
+        hex: v.hex,
+        sort: index,
+      }));
+
+  const sizes = sizesFor(
+    settings,
+    sizeType,
+    dedupe(effectiveVariants.map((v) => v.size), (s) => s),
+  );
+
+  const purchasable =
+    priced.length > 0 &&
+    priced.some((v) => !v.trackStock || v.stock > 0) &&
+    (sizeType !== "print" || priced.length === availableVariants.length);
+
   return ok(c, {
     id: product.id,
     slug: product.slug,
@@ -316,6 +417,12 @@ app.get("/:slug", async (c) => {
     description: product.description,
     price_cents: product.price_cents,
     old_price_cents: product.old_price_cents,
+    priceCents: priceFrom,
+    priceFromCents: priceFrom,
+    priceToCents: priceTo,
+    hasPriceRange: priceTo > priceFrom,
+    sizeType,
+    currency: currency.code,
     category:
       product.category_slug && product.category_name
         ? { slug: product.category_slug, name: product.category_name }
@@ -342,32 +449,35 @@ app.get("/:slug", async (c) => {
     options: optionsArray,
     images: images.map((img) => ({
       ...(imageShape(img) as object),
+      colorId: img.option_value_id,
       colorName: img.color_name,
       optionValueId: img.option_value_id,
       isPrimary: !!img.is_primary,
+      sort: img.sort,
       alt: img.alt ?? img.alt_m,
     })),
-    variants: variants.map((v) => ({
+    variants: effectiveVariants.map((v) => ({
       id: v.id,
       color_name: v.color_name,
+      colorName: v.color_name,
+      colorId: colorOption?.values.find((value) => value.value === v.color_name)?.id ?? null,
       color_hex: v.color_hex,
       size: v.size,
       sku: v.sku,
       stock: v.stock,
-      optionValueIds: v.option_value_ids ? JSON.parse(v.option_value_ids) : [],
-      priceCents: v.price_cents,
-      compareAtPriceCents: v.compare_at_price_cents,
-      trackStock: !!v.track_stock,
-      isActive: !!v.is_active,
+      optionValueIds: v.optionValueIds,
+      priceCents: v.priceCents,
+      oldPriceCents: v.oldPriceCents,
+      compareAtPriceCents: v.oldPriceCents,
+      // Print sizes must carry their own price; the storefront disables a size
+      // without one instead of showing the product's base price.
+      hasOwnPrice: v.hasOwnPrice,
+      trackStock: v.trackStock,
+      isActive: v.isActive,
     })),
-    colors: dedupe(
-      variants.map((v) => ({ name: v.color_name, hex: v.color_hex })),
-      (v) => v.name,
-    ),
-    sizes: dedupe(
-      variants.map((v) => v.size),
-      (s) => s,
-    ),
+    colors,
+    sizes,
+    purchasable,
     pairWith: relations
       .filter((r) => r.type === "pair")
       .map((r) => byId.get(r.related_id))
@@ -381,7 +491,8 @@ app.get("/:slug", async (c) => {
 
 /** GET /products/:slug/reviews — approved reviews only. */
 app.get("/:slug/reviews", async (c) => {
-  setPublicCache(c);
+  const version = await getContentVersion(c.env);
+  if (setContentCache(c, version)) return c.body(null, 304);
   const env = c.env;
   const slug = c.req.param("slug");
   const product = await first<{ id: number }>(

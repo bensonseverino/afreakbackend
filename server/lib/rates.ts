@@ -4,15 +4,16 @@ import { first, run } from "./db";
 /**
  * Live display-exchange rates.
  *
- * The shop stores prices in EUR and always charges EUR; these rates only decide
- * how prices are *shown* when the shopper picks another currency. Providers
- * quote against USD, so the storefront converts with `rate[target] / rate[EUR]`.
+ * The shop stores prices in the store currency (KES by default) and always
+ * charges that currency; these rates only decide how prices are *shown* when the
+ * shopper picks another currency. Providers quote against USD, so the
+ * storefront converts with `rate[target] / rate[base]`.
  *
  * Resolution order (spec §4):
  *   1. Upstream provider (keyed ExchangeRate-API when a key is configured)
  *   2. Free fallback provider (open.er-api.com)
  *   3. Last cached response in D1 (served with `stale: true`)
- *   4. Hardcoded fallback with `null`s — the storefront then keeps showing EUR
+ *   4. Hardcoded fallback with `null`s — the storefront then keeps showing base prices
  */
 
 export const RATES_BASE = "USD";

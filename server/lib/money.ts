@@ -1,4 +1,5 @@
-/** Money helpers. All amounts are integer cents. */
+/** Money helpers. All amounts are integer minor units of the store currency. */
+import { formatMoney as sharedFormatMoney } from "../../shared/money.js";
 
 export type DeliveryMethod = "standard" | "express";
 
@@ -7,6 +8,13 @@ export type ShippingConfig = {
   flatCents: number;
   expressCents: number;
 };
+
+export type CurrencyConfig = {
+  code: string;
+  locale: string;
+};
+
+export const DEFAULT_CURRENCY: CurrencyConfig = { code: "KES", locale: "en-KE" };
 
 export function parseCents(value: string | undefined, fallback = 0): number {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -35,7 +43,11 @@ export function promoDiscount(
   return Math.max(0, Math.min(raw, subtotalCents));
 }
 
-export function formatCents(cents: number, currency = "EUR"): string {
-  const symbol = currency === "EUR" ? "€" : currency === "USD" ? "$" : `${currency} `;
-  return `${symbol}${(cents / 100).toFixed(2)}`;
+/** Minor units -> "KES 3,500" using the shared formatter. */
+export function formatCents(
+  cents: number,
+  currency = DEFAULT_CURRENCY.code,
+  locale = DEFAULT_CURRENCY.locale,
+): string {
+  return sharedFormatMoney(cents, currency, locale);
 }

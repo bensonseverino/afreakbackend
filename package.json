@@ -17,6 +17,10 @@
     "db:seed:remote": "wrangler d1 execute afreak-db --remote --file=./seeds/0002_seed.sql",
     "db:export": "wrangler d1 export afreak-db --remote --output=backup.sql",
     "smoke:account": "node scripts/account-smoke.mjs",
+    "db:recalc": "node scripts/recalc-product-denorm.mjs",
+    "db:recalc:remote": "node scripts/recalc-product-denorm.mjs --remote",
+    "db:convert-prices": "node scripts/convert-prices.mjs",
+    "check:cms": "node scripts/e2e-cms-check.mjs",
     "cf:types": "wrangler types",
     "deploy": "npm run build && wrangler pages deploy dist --project-name afreakcms"
   },

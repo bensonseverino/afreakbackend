@@ -19,6 +19,7 @@ const NAV = [
   ["Promos", "/admin/promos"],
   ["Content", "/admin/content"],
   ["Settings", "/admin/settings"],
+  ["Diagnostics", "/admin/diagnostics"],
 ];
 
 /** Square volt badge (pending accounts + open reset requests), refreshed every 60 s. */
@@ -60,6 +61,14 @@ export default function AdminLayout({ admin }) {
   const logout = useLogout();
   const navigate = useNavigate();
 
+  // Identity footer: proves which deployment and which D1 the CMS is editing.
+  const identityQuery = useQuery({
+    queryKey: ["admin-identity"],
+    queryFn: () => api("/health").then((r) => r.data),
+    staleTime: 60000,
+  });
+  const identity = identityQuery.data;
+
   const counts = useQuery({
     queryKey: ["admin-customer-counts"],
     queryFn: () => api("/admin/customers/counts").then((r) => r.data),
@@ -85,7 +94,10 @@ export default function AdminLayout({ admin }) {
         </div>
         <NavList pendingTotal={pendingTotal} />
         <div className="mt-auto border-t border-white/10 p-4">
-          <p className="label mb-3 text-white/50">{admin?.email}</p>
+          <p className="label mb-1 text-white/50">{admin?.email}</p>
+          <p className="mb-3 font-mono text-[10px] leading-tight text-white/35">
+            {identity ? `env ${identity.env} · build ${identity.buildId ?? "local"} · db ${identity.dbId} · v${identity.contentVersion}` : "identity…"}
+          </p>
           <div className="flex flex-col gap-2">
             <a
               href="/"

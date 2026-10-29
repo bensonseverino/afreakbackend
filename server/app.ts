@@ -3,6 +3,8 @@ import type { AppEnv } from "./env";
 import { cors } from "./middleware/cors";
 import { sameOrigin } from "./middleware/csrf";
 import { ApiError, errorBody, ok } from "./lib/http";
+import { getIdentity } from "./lib/identity";
+import { setNoStore } from "./middleware/cache";
 import publicRoutes from "./routes/public";
 import accountRoutes from "./routes/account";
 import adminRoutes from "./routes/admin";
@@ -17,7 +19,12 @@ export function buildApp() {
   app.use("*", cors);
   app.use("*", sameOrigin);
 
-  app.get("/health", (c) => ok(c, { ok: true }));
+  // Identity (env, build, D1/R2, content version) so the admin and the
+  // storefront can prove they are talking to the same database (cause C-1).
+  app.get("/health", async (c) => {
+    setNoStore(c);
+    return ok(c, { ok: true, ...(await getIdentity(c.env)) });
+  });
 
   app.route("/", publicRoutes);
   app.route("/account", accountRoutes);

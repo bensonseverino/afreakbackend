@@ -4,7 +4,7 @@ import { all } from "./db";
 import { promoDiscount, shippingFor, type DeliveryMethod } from "./money";
 import { findPromo, promoUsable, type PromoRow } from "./promo";
 import { imageShape, type ImageRef } from "./media";
-import { getSettings, shippingConfig } from "./settings";
+import { getSettings, shippingConfig, currencyConfig } from "./settings";
 
 export type PrintInput = { placement?: string | null; artworkKey?: string | null } | null;
 
@@ -37,7 +37,7 @@ export type PricedLine = {
 export type QuoteIssue = {
   lineId: number;
   variantId: number;
-  code: "UNAVAILABLE" | "OUT_OF_STOCK" | "NOT_CUSTOMIZABLE";
+  code: "UNAVAILABLE" | "OUT_OF_STOCK" | "NOT_CUSTOMIZABLE" | "PRICE_MISSING";
   message: string;
   available: number;
 };
@@ -72,6 +72,7 @@ type VariantRow = {
   name: string;
   price_cents: number;
   print_addon_cents: number;
+  size_type: string;
   customizable: number;
   status: string;
   image_key: string | null;
@@ -92,7 +93,7 @@ async function loadVariants(env: Env, ids: number[]): Promise<Map<number, Varian
   const rows = await all<VariantRow>(
     env.DB,
     `SELECT v.id, v.product_id, v.color_name, v.size, v.stock,
-            p.slug, p.name, p.price_cents, p.print_addon_cents, p.customizable, p.status,
+            p.slug, p.name, p.price_cents, p.print_addon_cents, p.size_type, p.customizable, p.status,
             m.key AS image_key, m.alt AS image_alt, m.width AS image_width, m.height AS image_height,
             v.price_cents AS variant_price_cents, v.compare_at_price_cents AS variant_compare_at_price_cents,
             v.track_stock, v.is_active, v.option_value_ids
@@ -174,8 +175,21 @@ export async function buildQuote(
       });
     }
 
+    // Print products price every size individually: a variant without its own
+    // price is not sellable rather than silently falling back to the base.
+    const priceMissing = v.size_type === "print" && v.variant_price_cents == null;
     const effectivePriceCents = v.variant_price_cents ?? v.price_cents;
     const unitPriceCents = effectivePriceCents + printAddonCents;
+
+    if (priceMissing) {
+      issues.push({
+        lineId,
+        variantId: v.id,
+        code: "PRICE_MISSING",
+        message: "This size has no price yet",
+        available: 0,
+      });
+    }
 
     let available: boolean;
     if (!v.track_stock) {
@@ -183,7 +197,8 @@ export async function buildQuote(
     } else {
       available = v.stock >= qty;
     }
-    if (!available) {
+    if (priceMissing) available = false;
+    if (!available && !priceMissing) {
       issues.push({
         lineId,
         variantId: v.id,
@@ -245,8 +260,9 @@ export async function buildQuote(
     }
   }
 
-  const settings = await getSettings(env, ["shipping"]);
+  const settings = await getSettings(env, ["shipping", "currency", "store"]);
   const config = shippingConfig(env, settings);
+  const currency = currencyConfig(env, settings);
   const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
   const shippingCents = shippingFor(deliveryMethod, discountedSubtotal, config);
   const totalCents = discountedSubtotal + shippingCents;
@@ -258,7 +274,7 @@ export async function buildQuote(
     discountCents,
     shippingCents,
     totalCents,
-    currency: env.CURRENCY,
+    currency: currency.code,
     deliveryMethod,
     freeShippingThresholdCents: config.thresholdCents,
     promo,
