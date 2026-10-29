@@ -188,6 +188,8 @@ const imageSchema = z.object({
 });
 
 const variantSchema = z.object({
+  // Present when the editor saved an existing row; keeps its id stable.
+  id: z.coerce.number().int().positive().optional(),
   // Empty for products without colours (prints/posters).
   colorName: z.string().trim().max(60).default(""),
   colorHex: z.string().trim().regex(/^#[0-9a-fA-F]{3,8}$/, "Invalid hex color"),
@@ -282,11 +284,14 @@ function autoSku(slug: string, colorName: string, size: string): string {
   return `AF-${slug}-${slugify(colorName)}-${slugify(size)}`.slice(0, 80);
 }
 
+type ExistingVariant = { id: number; color_name: string; size: string };
+
 function childStatements(
   statements: BatchStatement[],
   productRef: { sql: string; params: unknown[] },
   input: ProductInput,
   slug: string,
+  existingVariants: ExistingVariant[] = [],
 ) {
   const { sql: pidSql, params: pidParams } = productRef;
 
@@ -342,8 +347,17 @@ function childStatements(
     statements.push({ sql: combinedSql, params: combinedParams });
   }
 
-  // 3. Variants (with option_value_ids, price, compare_at, track_stock, is_active, position)
-  statements.push({ sql: `DELETE FROM product_variants WHERE product_id = ${pidSql}`, params: pidParams });
+  // 3. Variants. Existing rows are updated in place so their ids survive a save:
+  // storefront carts, order references and anything else holding a variantId
+  // keep pointing at the same row. Rows dropped from the form are deleted.
+  const variantKey = (colorName: string, size: string) =>
+    `${(colorName ?? "").trim().toLowerCase()}|${(size ?? "").trim().toLowerCase()}`;
+  const existingById = new Map(existingVariants.map((row) => [row.id, row]));
+  const existingByKey = new Map(
+    existingVariants.map((row) => [variantKey(row.color_name, row.size), row]),
+  );
+  const keptIds = new Set<number>();
+
   for (let i = 0; i < variants.length; i++) {
     const v = variants[i];
     // Build option_value_ids JSON array via subqueries in the order of options
@@ -364,26 +378,51 @@ function childStatements(
     }
     const optionValueIdsSql = subqueryParts.length ? `json_array(${subqueryParts.join(",")})` : "'[]'";
 
+    const values = [
+      cleanText(v.colorName, 60),
+      v.colorHex,
+      cleanText(v.size, 30),
+      v.sku ? cleanText(v.sku, 80) : autoSku(slug, v.colorName, v.size),
+      v.stock,
+      ...subqueryParams,
+      v.priceCents ?? null,
+      v.compareAtPriceCents ?? null,
+      v.trackStock === false ? 0 : 1,
+      v.isActive === false ? 0 : 1,
+      i,
+    ];
+
+    const match =
+      (v.id != null ? existingById.get(v.id) : undefined) ??
+      existingByKey.get(variantKey(v.colorName, v.size)) ??
+      null;
+
+    if (match) {
+      keptIds.add(match.id);
+      statements.push({
+        sql: `UPDATE product_variants SET
+                color_name = ?, color_hex = ?, size = ?, sku = ?, stock = ?,
+                option_value_ids = ${optionValueIdsSql},
+                price_cents = ?, compare_at_price_cents = ?, track_stock = ?, is_active = ?,
+                position = ?
+              WHERE id = ?`,
+        params: [...values, match.id],
+      });
+      continue;
+    }
+
     statements.push({
       sql: `INSERT INTO product_variants
             (product_id, color_name, color_hex, size, sku, stock,
              option_value_ids, price_cents, compare_at_price_cents, track_stock, is_active, position)
             VALUES (${pidSql}, ?, ?, ?, ?, ?, ${optionValueIdsSql}, ?, ?, ?, ?, ?)`,
-      params: [
-        ...pidParams,
-        cleanText(v.colorName, 60),
-        v.colorHex,
-        cleanText(v.size, 30),
-        v.sku ? cleanText(v.sku, 80) : autoSku(slug, v.colorName, v.size),
-        v.stock,
-        ...subqueryParams,
-        v.priceCents ?? null,
-        v.compareAtPriceCents ?? null,
-        v.trackStock ? 1 : 1,
-        v.isActive ? 1 : 1,
-        i,
-      ],
+      params: [...pidParams, ...values],
     });
+  }
+
+  for (const old of existingVariants) {
+    if (keptIds.has(old.id)) continue;
+    statements.push({ sql: "DELETE FROM product_variants WHERE id = ?", params: [old.id] });
   }
 
   // 4. Denormalised price range (same batch, so it sees the new variants).
@@ -507,7 +546,12 @@ app.put("/:id", async (c) => {
     },
   ];
 
-  childStatements(statements, { sql: "?", params: [id] }, input, slug);
+  const existingVariants = await all<ExistingVariant>(
+    c.env.DB,
+    "SELECT id, color_name, size FROM product_variants WHERE product_id = ?",
+    [id],
+  );
+  childStatements(statements, { sql: "?", params: [id] }, input, slug, existingVariants);
   await batch(c.env.DB, statements);
 
   return ok(c, { id, slug });

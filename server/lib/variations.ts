@@ -33,6 +33,8 @@ export type OptionDraft = {
 };
 
 export type VariantDraft = {
+  /** Existing row this draft came from; preserved so saves update instead of recreate. */
+  id?: number;
   colorName: string;
   colorHex: string;
   size: string;

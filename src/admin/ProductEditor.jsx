@@ -285,6 +285,8 @@ export default function ProductEditor() {
         isPrimary: i === form.images.findIndex((x) => (x.colorName || "") === (img.colorName || "")),
       })),
       variants: form.variants.map((v) => ({
+        // Keep the saved row's id so an edit updates it instead of recreating it.
+        id: v.id || undefined,
         colorName: v.colorName || "",
         colorHex: v.colorHex || "#000000",
         size: v.size,
@@ -292,6 +294,8 @@ export default function ProductEditor() {
         stock: Number(v.stock) || 0,
         priceCents: v.priceCents ?? null,
         compareAtPriceCents: v.compareAtPriceCents ?? null,
+        trackStock: v.trackStock !== false,
+        isActive: v.isActive !== false,
       })),
       relations: [
         ...form.pairWith.map((r, i) => ({ relatedId: r.relatedId ?? r, type: "pair", sort: i })),
