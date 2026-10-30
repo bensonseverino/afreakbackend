@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { first } from "./db";
+import { CATALOG_CURRENCY, convertCents } from "./money";
 
 export type PromoRow = {
   code: string;
@@ -35,4 +36,24 @@ export function promoUsable(promo: PromoRow, subtotalCents: number): PromoCheck 
     return { usable: false, reason: "Order does not meet the minimum for this code" };
   }
   return { usable: true };
+}
+
+/**
+ * Promo amounts (`min_subtotal_cents`, and `value` for a fixed code) are stored
+ * in the store currency, while quote and validation subtotals are in the
+ * catalog currency. Convert them once so a minimum or a fixed discount is
+ * compared and subtracted in the same units as the subtotal.
+ */
+export function promoInCurrency(
+  promo: PromoRow,
+  rates: Record<string, number | null> | null,
+  from: string,
+  to: string = CATALOG_CURRENCY,
+): PromoRow {
+  if (from === to || !rates) return promo;
+  return {
+    ...promo,
+    min_subtotal_cents: convertCents(promo.min_subtotal_cents, rates, from, to),
+    value: promo.type === "fixed" ? convertCents(promo.value, rates, from, to) : promo.value,
+  };
 }

@@ -2,7 +2,7 @@
 import type { Env } from "../env";
 import { all } from "./db";
 import { CATALOG_CURRENCY, convertCents, promoDiscount, shippingFor, type DeliveryMethod } from "./money";
-import { findPromo, promoUsable, type PromoRow } from "./promo";
+import { findPromo, promoInCurrency, promoUsable, type PromoRow } from "./promo";
 import { imageShape, type ImageRef } from "./media";
 import { getSettings, shippingConfig, currencyConfig } from "./settings";
 import { getRates } from "./rates";
@@ -235,12 +235,33 @@ export async function buildQuote(
     });
   });
 
+  const settings = await getSettings(env, ["shipping", "currency", "store"]);
+  const config = shippingConfig(env, settings);
+  const storeCurrency = currencyConfig(env, settings).code;
+  // USD-quoted rates, only needed when the store currency differs from the
+  // currency the catalog prices are stored in.
+  const rates = storeCurrency === CATALOG_CURRENCY ? null : (await getRates(env)).rates;
+
+  // `settings.shipping` and the promo amounts are expressed in the store
+  // currency (KES) while the product prices above are in CATALOG_CURRENCY.
+  // Convert them so the threshold comparison, the discount, the shipping line
+  // and the total all speak the same currency.
+  const shippingConfigForQuote =
+    !rates
+      ? config
+      : {
+          thresholdCents: convertCents(config.thresholdCents, rates, storeCurrency, CATALOG_CURRENCY),
+          flatCents: convertCents(config.flatCents, rates, storeCurrency, CATALOG_CURRENCY),
+          expressCents: convertCents(config.expressCents, rates, storeCurrency, CATALOG_CURRENCY),
+        };
+
   // Promo
   let promo: Quote["promo"] = null;
   let discountCents = 0;
   const code = input.promoCode?.trim();
   if (code) {
-    const row: PromoRow | null = await findPromo(env, code);
+    const found: PromoRow | null = await findPromo(env, code);
+    const row = found ? promoInCurrency(found, rates, storeCurrency) : null;
     if (!row) {
       promo = { code, type: "percent", value: 0, valid: false, reason: "Invalid code", discountCents: 0 };
     } else {
@@ -259,25 +280,6 @@ export async function buildQuote(
         };
       }
     }
-  }
-
-  const settings = await getSettings(env, ["shipping", "currency", "store"]);
-  const config = shippingConfig(env, settings);
-  const storeCurrency = currencyConfig(env, settings).code;
-
-  // `settings.shipping` is expressed in the store currency (KES) while the
-  // product prices above are in CATALOG_CURRENCY. Convert the shipping side so
-  // the threshold comparison, the shipping line and the total all speak the
-  // same currency — otherwise free shipping can never trigger and the total
-  // adds KES cents to EUR cents.
-  let shippingConfigForQuote = config;
-  if (storeCurrency !== CATALOG_CURRENCY) {
-    const { rates } = await getRates(env);
-    shippingConfigForQuote = {
-      thresholdCents: convertCents(config.thresholdCents, rates, storeCurrency, CATALOG_CURRENCY),
-      flatCents: convertCents(config.flatCents, rates, storeCurrency, CATALOG_CURRENCY),
-      expressCents: convertCents(config.expressCents, rates, storeCurrency, CATALOG_CURRENCY),
-    };
   }
 
   const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
