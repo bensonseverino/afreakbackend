@@ -30,3 +30,6 @@ backup-*.sql
 *.njsproj
 *.sln
 *.sw?
+
+# Local e2e scratch artifacts (cookies, media ids, screenshots)
+.e2e-*
