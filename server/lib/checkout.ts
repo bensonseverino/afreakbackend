@@ -243,9 +243,9 @@ export async function buildQuote(
   const rates = storeCurrency === CATALOG_CURRENCY ? null : (await getRates(env)).rates;
 
   // `settings.shipping` and the promo amounts are expressed in the store
-  // currency (KES) while the product prices above are in CATALOG_CURRENCY.
-  // Convert them so the threshold comparison, the discount, the shipping line
-  // and the total all speak the same currency.
+  // currency, which is now the same currency the catalog prices are stored in,
+  // so this conversion is normally a no-op. It stays so a CMS currency change
+  // cannot mix units in the threshold comparison, the shipping line or the total.
   const shippingConfigForQuote =
     !rates
       ? config

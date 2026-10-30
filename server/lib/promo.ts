@@ -40,9 +40,10 @@ export function promoUsable(promo: PromoRow, subtotalCents: number): PromoCheck 
 
 /**
  * Promo amounts (`min_subtotal_cents`, and `value` for a fixed code) are stored
- * in the store currency, while quote and validation subtotals are in the
- * catalog currency. Convert them once so a minimum or a fixed discount is
- * compared and subtracted in the same units as the subtotal.
+ * in the store currency. They are normally already in the catalog currency
+ * (KES), so this returns the row untouched; it converts only if the CMS store
+ * currency is set to something else, keeping the minimum comparable and the
+ * fixed discount subtractable in the subtotal's units.
  */
 export function promoInCurrency(
   promo: PromoRow,
