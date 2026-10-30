@@ -1,10 +1,11 @@
 /** Server-authoritative pricing for carts, quotes and orders. */
 import type { Env } from "../env";
 import { all } from "./db";
-import { promoDiscount, shippingFor, type DeliveryMethod } from "./money";
+import { CATALOG_CURRENCY, convertCents, promoDiscount, shippingFor, type DeliveryMethod } from "./money";
 import { findPromo, promoUsable, type PromoRow } from "./promo";
 import { imageShape, type ImageRef } from "./media";
 import { getSettings, shippingConfig, currencyConfig } from "./settings";
+import { getRates } from "./rates";
 
 export type PrintInput = { placement?: string | null; artworkKey?: string | null } | null;
 
@@ -262,9 +263,25 @@ export async function buildQuote(
 
   const settings = await getSettings(env, ["shipping", "currency", "store"]);
   const config = shippingConfig(env, settings);
-  const currency = currencyConfig(env, settings);
+  const storeCurrency = currencyConfig(env, settings).code;
+
+  // `settings.shipping` is expressed in the store currency (KES) while the
+  // product prices above are in CATALOG_CURRENCY. Convert the shipping side so
+  // the threshold comparison, the shipping line and the total all speak the
+  // same currency — otherwise free shipping can never trigger and the total
+  // adds KES cents to EUR cents.
+  let shippingConfigForQuote = config;
+  if (storeCurrency !== CATALOG_CURRENCY) {
+    const { rates } = await getRates(env);
+    shippingConfigForQuote = {
+      thresholdCents: convertCents(config.thresholdCents, rates, storeCurrency, CATALOG_CURRENCY),
+      flatCents: convertCents(config.flatCents, rates, storeCurrency, CATALOG_CURRENCY),
+      expressCents: convertCents(config.expressCents, rates, storeCurrency, CATALOG_CURRENCY),
+    };
+  }
+
   const discountedSubtotal = Math.max(0, subtotalCents - discountCents);
-  const shippingCents = shippingFor(deliveryMethod, discountedSubtotal, config);
+  const shippingCents = shippingFor(deliveryMethod, discountedSubtotal, shippingConfigForQuote);
   const totalCents = discountedSubtotal + shippingCents;
 
   return {
@@ -274,9 +291,9 @@ export async function buildQuote(
     discountCents,
     shippingCents,
     totalCents,
-    currency: currency.code,
+    currency: CATALOG_CURRENCY,
     deliveryMethod,
-    freeShippingThresholdCents: config.thresholdCents,
+    freeShippingThresholdCents: shippingConfigForQuote.thresholdCents,
     promo,
   };
 }
